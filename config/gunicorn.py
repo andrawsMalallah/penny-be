@@ -16,4 +16,4 @@ accesslog = None
 capture_output = False
 # Django handles the explicitly opted-in proxy header. Do not separately trust other headers.
 secure_scheme_headers = {}
-forwarder_headers = []
+forwarder_headers = ""
