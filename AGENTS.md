@@ -41,6 +41,10 @@ checkout. The user's global instructions continue to apply.
 
 ## Runtime and tests
 
+- Dockerfile runs the existing web/worker supervisor as UID 10001. Build from the backend
+  root; .dockerignore allows only runtime sources. Northflank deployment and CMD health
+  probes are documented in docs/northflank.md. Container build/start never apply migrations.
+
 - GitHub Actions uses an isolated PostgreSQL 17 service on localhost:5432/penny with
   disposable CI-only credentials/keys. The local guarded runner is reused unchanged;
   no production secrets or Neon connection are available to CI. Backend checks must

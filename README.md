@@ -11,6 +11,7 @@ versions are pinned in requirements.txt. No admin site is exposed.
 - [Authentication API and manual checks](docs/authentication.md)
 - [Financial, debt and backup API](docs/finances.md)
 - [Render Free deployment and hosted acceptance](docs/deployment.md)
+- [Northflank Docker deployment](docs/northflank.md)
 - [Deferred device-verification research](docs/device-verification.md)
 - [Contributor instructions](AGENTS.md)
 
