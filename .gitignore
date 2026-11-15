@@ -1,0 +1,13 @@
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.ruff_cache/
+*.sqlite3
+htmlcov/
+.coverage
+staticfiles/
+/AGENTS.md
+/MEMORY.md
