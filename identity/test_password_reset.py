@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .models import CodeRequestLimit, PasswordReset, User
+from .models import CodeRequestLimit, PasswordReset, SignedInSession, User
 
 
 class PasswordResetTests(TestCase):
@@ -61,6 +61,7 @@ class PasswordResetTests(TestCase):
         self.assertTrue(challenge.code_hash)
         self.assertEqual(self.verify(code, devices[0]).status_code, 204)
         self.assertEqual(self.complete(client=devices[0]).status_code, 204)
+        self.assertFalse(SignedInSession.objects.filter(user=self.user).exists())
         for device in devices:
             self.assertEqual(device.get("/api/v1/auth/me/").status_code, 403)
         self.assertEqual(other_device.get("/api/v1/auth/me/").status_code, 200)

@@ -1,16 +1,19 @@
-from django.contrib.auth import login, logout
+from django.contrib.auth import logout
 from django.http import HttpRequest, JsonResponse
 from django.middleware.csrf import get_token
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import SignedInSession, User
 from .password_reset import (
     GENERIC_RESET_MESSAGE,
     complete_password_reset,
@@ -24,6 +27,7 @@ from .serializers import (
     PasswordResetCompleteSerializer,
     PasswordResetRequestSerializer,
     RegistrationSerializer,
+    SignedInSessionSerializer,
 )
 from .services import (
     GENERIC_REQUEST_MESSAGE,
@@ -33,6 +37,7 @@ from .services import (
     start_registration,
     verify_registration,
 )
+from .sessions import revoke_user_sessions, start_user_session
 
 
 @require_GET
@@ -91,7 +96,7 @@ class VerifyEmailView(ProtectedAPIView):
             request.session.get("registration_id"), serializer.validated_data["code"]
         )
         request.session.pop("registration_id", None)
-        login(request._request, user, backend="django.contrib.auth.backends.ModelBackend")
+        start_user_session(request._request, user)
         return Response(CurrentUserSerializer(user).data)
 
 
@@ -110,12 +115,33 @@ class LoginView(ProtectedAPIView):
             **serializer.validated_data, remote_address=request.META.get("REMOTE_ADDR", "unknown")
         )
         request.session.pop("registration_id", None)
-        login(request._request, user)
+        start_user_session(request._request, user)
         return Response(CurrentUserSerializer(user).data)
 
 
 class LogoutView(ProtectedAPIView):
     def post(self, request: Request) -> Response:
+        logout(request._request)
+        return Response(status=204)
+
+
+class SessionListView(ProtectedAPIView):
+    def get(self, request: Request) -> Response:
+        generation = User.objects.values_list("session_generation", flat=True).get(
+            pk=request.user.pk
+        )
+        sessions = SignedInSession.objects.filter(
+            user=request.user, generation=generation, session__expire_date__gt=timezone.now()
+        ).order_by("-last_active_at", "session_id")
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(sessions, request, view=self)
+        serializer = SignedInSessionSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+
+class LogoutAllView(ProtectedAPIView):
+    def post(self, request: Request) -> Response:
+        revoke_user_sessions(request.user)
         logout(request._request)
         return Response(status=204)
 

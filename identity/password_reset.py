@@ -14,6 +14,7 @@ from rest_framework.exceptions import ValidationError
 
 from .models import PasswordReset, User
 from .services import CODE_LIFETIME, INVALID_CODE_MESSAGE, MAX_CODE_ATTEMPTS, enforce_request_limit
+from .sessions import revoke_user_sessions
 
 GENERIC_RESET_MESSAGE = (
     "If this address has an eligible account, a password reset code will be sent."
@@ -115,6 +116,7 @@ def complete_password_reset(generation: str | None, password: str) -> None:
             )
         user.set_password(password)
         user.save(update_fields=["password"])
+        revoke_user_sessions(user)
         # Django rejects old sessions by their auth hash on their next request.
         # Do not call update_session_auth_hash: recovery must sign out every device.
         challenge.verified = False

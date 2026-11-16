@@ -31,6 +31,7 @@ class User(AbstractUser):
     email_verified = models.BooleanField(default=False)
     language = models.CharField(max_length=2, choices=[("en", "English"), ("ar", "Arabic")])
     timezone = models.CharField(max_length=100, default="UTC")
+    session_generation = models.PositiveBigIntegerField(default=0)
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["display_name", "language"]
     objects = UserManager()
@@ -79,3 +80,22 @@ class PasswordReset(models.Model):
     expires_at = models.DateTimeField(null=True, db_index=True)
     failed_attempts = models.PositiveSmallIntegerField(default=0)
     verified = models.BooleanField(default=False)
+
+
+class SignedInSession(models.Model):
+    """Indexed metadata only; Django owns session keys, signing and expiration."""
+
+    session = models.OneToOneField("sessions.Session", primary_key=True, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    generation = models.PositiveBigIntegerField()
+    browser = models.CharField(max_length=30)
+    device = models.CharField(max_length=30)
+    signed_in_at = models.DateTimeField(null=True)
+    last_active_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "-last_active_at", "session"], name="user_session_activity"
+            )
+        ]

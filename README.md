@@ -66,6 +66,8 @@ Routes begin with `/api/v1/`. Auth responses are private/no-store. For writes, f
 | `auth/login/` | POST | Active verified-user email/password sign-in |
 | `auth/me/` | GET | Current user's safe profile |
 | `auth/logout/` | POST | End session |
+| `auth/sessions/` | GET | Current user's active session metadata; 30 per page (`?page=2`) |
+| `auth/logout-all/` | POST | Revoke every existing session, including this browser; CSRF required |
 | `auth/password-reset/` | POST | Request an email recovery code (`email`) |
 | `auth/password-reset/verify/` | POST | Verify the code in the requesting browser (`code`) |
 | `auth/password-reset/complete/` | POST | Consume verified recovery and set a new password (`password`) |
@@ -78,7 +80,15 @@ Verification hashes/expiry/attempts, rate counters and sessions live in PostgreS
 
 Email is intentionally synchronous with a ten-second timeout and no background worker/retries. Failed sends consume allowance and leave a challenge inactive. A replacement invalidates the previous code even if sending fails. Successful SMTP submission is not proof of inbox delivery.
 
-Password reset is separate from registration. Request responses are identical for eligible, unknown, inactive and unverified addresses, including SMTP failure; this response does not confirm delivery. Recovery has separate limits of three requests/email/hour and 20/direct peer IP/hour. Codes are hash-only, expire after ten minutes and allow five wrong attempts. Verification rotates the browser session key and binds recovery proof to that session; completing recovery must happen before the original code expiry. Resending invalidates both the old code and any verified proof. Password validation includes requiring a different password. Completion consumes recovery atomically, flushes the requesting session and changes Django's authentication hash so every earlier authenticated session is denied on its next request. It does not sign in automatically. The frontend refreshes CSRF before subsequent sign-in. No device-list/logout-all screen is implemented yet.
+Password reset is separate from registration. Request responses are identical for eligible, unknown, inactive and unverified addresses, including SMTP failure; this response does not confirm delivery. Recovery has separate limits of three requests/email/hour and 20/direct peer IP/hour. Codes are hash-only, expire after ten minutes and allow five wrong attempts. Verification rotates the browser session key and binds recovery proof to that session; completing recovery must happen before the original code expiry. Resending invalidates both the old code and any verified proof. Password validation includes requiring a different password. Completion consumes recovery atomically, flushes the requesting session and changes Django's authentication hash so every earlier authenticated session is denied on its next request. It does not sign in automatically. The frontend refreshes CSRF before subsequent sign-in.
+
+## Signed-in devices
+
+Apply additive `identity/0003_user_session_generation_signedinsession` to the intended development database before starting this version. It adds a per-user revocation counter and indexed metadata linked to Django's existing session table; it does not change passwords or reset user data. Production migration remains a separate deployment decision.
+
+The session list returns only browser/device labels, sign-in time, last activity and `is_current`, never keys, auth hashes, raw user-agent headers or IPs. Device labels are approximate. New login/verification sessions record sign-in time. Existing sessions are enrolled on their next authenticated request, with an unavailable sign-in time; unused legacy sessions will not appear yet. Last activity records authenticated API use, not background browser activity. The existing fixed 12-hour lifetime is preserved. Expired sessions are excluded; metadata cascades when Django deletes its session. Scheduled session retention remains a separate operational task.
+
+Sign-out-all locks the user row, advances its revocation counter and deletes tracked sessions. Middleware rejects earlier counters on subsequent requests, including untracked legacy sessions or stale session data saved by an already-running request. A request already authorized before revocation may finish; revocation cannot undo completed work. New sign-ins still work. Password recovery also revokes tracked metadata. Tests cover stale saves and authentication begun before a password change; true PostgreSQL concurrency still requires separate integration verification.
 
 ## Hourly cleanup
 

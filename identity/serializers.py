@@ -4,7 +4,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import User
+from .models import SignedInSession, User
 
 
 class RegistrationSerializer(serializers.Serializer):
@@ -61,3 +61,15 @@ class CurrentUserSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "email", "display_name", "email_verified", "language", "timezone"]
         read_only_fields = fields
+
+
+class SignedInSessionSerializer(serializers.ModelSerializer):
+    is_current = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SignedInSession
+        fields = ["browser", "device", "signed_in_at", "last_active_at", "is_current"]
+        read_only_fields = fields
+
+    def get_is_current(self, instance: SignedInSession) -> bool:
+        return instance.session_id == self.context["request"].session.session_key
