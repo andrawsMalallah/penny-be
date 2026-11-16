@@ -40,6 +40,26 @@ class User(AbstractUser):
         constraints = [models.UniqueConstraint(Lower("email"), name="unique_user_email_lower")]
 
 
+class UserSettings(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    default_currency = models.CharField(
+        max_length=3, choices=[("IQD", "IQD"), ("USD", "USD")], blank=True
+    )
+    exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(exchange_rate__isnull=True) | models.Q(exchange_rate__gt=0),
+                name="positive_settings_exchange_rate",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(default_currency__in=["", "IQD", "USD"]),
+                name="supported_settings_currency",
+            ),
+        ]
+
+
 class Registration(models.Model):
     """A draft, not a user: an email cannot be claimed before verification."""
 

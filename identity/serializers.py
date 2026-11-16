@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth.password_validation import validate_password
@@ -36,6 +37,29 @@ class RegistrationSerializer(serializers.Serializer):
 
 class CodeSerializer(serializers.Serializer):
     code = serializers.RegexField(r"\A[0-9]{6}\Z", trim_whitespace=False, write_only=True)
+
+
+class UserSettingsSerializer(serializers.Serializer):
+    language = serializers.ChoiceField(choices=["en", "ar"])
+    default_currency = serializers.ChoiceField(choices=["", "IQD", "USD"], allow_blank=True)
+    exchange_rate = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+        allow_null=True,
+        coerce_to_string=True,
+    )
+
+    def to_internal_value(self, data: object) -> dict:
+        if isinstance(data, dict):
+            unknown = set(data) - set(self.fields)
+            if unknown:
+                raise serializers.ValidationError({"detail": "Unsupported settings field."})
+            # Rates cross the JSON boundary as decimal strings, never floating-point values.
+            rate = data.get("exchange_rate")
+            if rate is not None and not isinstance(rate, str):
+                raise serializers.ValidationError({"exchange_rate": "Use a decimal string."})
+        return super().to_internal_value(data)
 
 
 class LoginSerializer(serializers.Serializer):

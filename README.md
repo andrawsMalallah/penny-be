@@ -66,6 +66,7 @@ Routes begin with `/api/v1/`. Auth responses are private/no-store. For writes, f
 | `auth/verify-email/` | POST | Single-use code consumption and verified-user session |
 | `auth/login/` | POST | Active verified-user email/password sign-in |
 | `auth/me/` | GET | Current user's safe profile |
+| `auth/session/` | GET | Guest-safe startup state: verified `user` or null, plus `two_factor_pending`; HTTP 200 for guests |
 | `auth/logout/` | POST | End session |
 | `auth/sessions/` | GET | Current user's active session metadata; 30 per page (`?page=2`) |
 | `auth/logout-all/` | POST | Revoke every existing session, including this browser; CSRF required |
@@ -95,7 +96,7 @@ Password reset is separate from registration. Request responses are identical fo
 
 Apply additive `identity/0003_user_session_generation_signedinsession` to the intended development database before starting this version. It adds a per-user revocation counter and indexed metadata linked to Django's existing session table; it does not change passwords or reset user data. Production migration remains a separate deployment decision.
 
-The session list returns only browser/device labels, sign-in time, last activity and `is_current`, never keys, auth hashes, raw user-agent headers or IPs. Device labels are approximate. New login/verification sessions record sign-in time. Existing sessions are enrolled on their next authenticated request, with an unavailable sign-in time; unused legacy sessions will not appear yet. Last activity records authenticated API use, not background browser activity. The existing fixed 12-hour lifetime is preserved. Expired sessions are excluded; metadata cascades when Django deletes its session. Scheduled session retention remains a separate operational task.
+The session list returns only browser/device labels, sign-in time, last activity and `is_current`, never keys, auth hashes, raw user-agent headers or IPs. Device labels are approximate and reflect the browser's reported identity. Recognized labels refresh on each authenticated request for that session, fixing descriptions stuck after browser updates/emulation changes; missing or unknown headers preserve known labels. Other sessions' descriptions and original sign-in times are preserved. New login/verification sessions record sign-in time. Existing sessions are enrolled on their next authenticated request, with an unavailable sign-in time; unused legacy sessions will not appear yet. Last activity records authenticated API use, not background browser activity. The fixed 12-hour lifetime is preserved. Expired sessions are excluded; metadata cascades when Django deletes its session. Scheduled retention remains a separate operational task.
 
 Sign-out-all locks the user row, advances its revocation counter and deletes tracked sessions. Middleware rejects earlier counters on subsequent requests, including untracked legacy sessions or stale session data saved by an already-running request. A request already authorized before revocation may finish; revocation cannot undo completed work. New sign-ins still work. Password recovery also revokes tracked metadata. Tests cover stale saves and authentication begun before a password change; true PostgreSQL concurrency still requires separate integration verification.
 
@@ -111,7 +112,7 @@ Setup needs the current password, expires after ten minutes and is bound to that
 
 Password reset preserves 2FA and unused recovery codes and signs out existing sessions as before. Losing both the authenticator and every recovery code cannot be bypassed by password reset; no support bypass exists. Users must save their recovery codes outside Penny. No trusted-device exemption is implemented.
 
-Local automated verification includes the complete 78-test backend suite against a disposable PostgreSQL database, with simultaneous reuse tests for authenticator and recovery codes. SQLite runs 76 tests and skips those two PostgreSQL-only tests. Tests use isolated email and test-only hashing; browser UI checks use simulated API responses. Actual phone/authenticator scanning and production deployment acceptance are separate.
+Local automated verification includes the complete 96-test backend suite against a disposable PostgreSQL database, with simultaneous reuse tests for authenticator and recovery codes, private settings, guest-safe session-state and device-label refresh coverage. SQLite passes 94 tests and skips those two PostgreSQL-only tests. Tests use isolated email and test-only hashing; browser UI checks use simulated API responses. Actual phone acceptance and production deployment acceptance are separate.
 
 ## Hourly cleanup
 
@@ -124,6 +125,16 @@ Local automated verification includes the complete 78-test backend suite against
 Clears expired hashes and pending 2FA setup ciphertext, and removes expired pre-authentication login challenges. Keeps active authenticator secrets/recovery hashes, live challenges, coordination rows, attempt counts, rate limits, drafts and user data. Batches are 500 rows, maximum 20 batches total across all types, bounded by `--batch-size`/`--max-batches`. Expiry is rechecked during updates. Cleanup does not extend challenge validity; expiry is enforced regardless of scheduling.
 
 For Northflank deployment, use a short scheduled Job with the same backend image, application working directory, command `python manage.py purge_expired_codes`, schedule `0 * * * *`, Forbid concurrency, 60-second deadline, no automatic retries and no run-on-source-change. Supply DB configuration and the Django secret; SMTP credentials/public ports are unnecessary. First inspect with dry-run, then activate after deployment approval. No hosted schedule is included or active in this repository. [Northflank scheduled jobs](https://northflank.com/docs/v1/application/run/run-an-image-once-or-on-a-schedule).
+
+Startup uses `auth/session/`, replacing the previous guest `auth/me/` 403 followed by a factor-pending request. Only verified authenticated sessions receive the existing safe user serializer. Guests receive null identity and a boolean for any valid browser-bound second-factor challenge, checked against its expiry, failure count, password hash and session generation. Responses are no-store; a fresh guest read creates no session. No session keys or secrets are returned, private access/CSRF protection remain unchanged, and `auth/me/` stays protected for explicit profile reads and stale-CSRF diagnosis.
+
+## Private settings
+
+Apply additive `identity/0005_usersettings` to the intended development database before using Settings. It adds a per-user table with optional default currency and exchange rate; existing users, balances and security state are preserved. Production migration requires separate authorization.
+
+`GET /api/v1/settings/` returns the authenticated verified user's `language`, `default_currency` (`IQD`, `USD` or an empty string) and nullable `exchange_rate`. A first read supplies empty preferences without creating a row. `POST` to the same endpoint requires all three fields and CSRF; unsupported fields are rejected. Ownership always comes from the session, never a supplied user ID. Writes lock the user and save account language/preferences atomically. Responses use no-store.
+
+The optional rate means **1 USD = X IQD**. It is a positive exact decimal string with up to 12 integer digits and six decimal places, or null to clear. JSON numeric rates are rejected to keep float values outside the contract. Database constraints also enforce positive rates and supported currencies. No rate is preset, no history is recalculated, and selecting a default spending account waits for account creation. Appearance remains a browser preference.
 
 ## Checks
 

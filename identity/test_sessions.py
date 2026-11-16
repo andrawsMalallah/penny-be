@@ -3,12 +3,12 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth import HASH_SESSION_KEY
 from django.contrib.sessions.models import Session
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import SignedInSession, User
-from .sessions import GENERATION_KEY, revoke_user_sessions, start_user_session
+from .sessions import GENERATION_KEY, device_details, revoke_user_sessions, start_user_session
 
 
 class SessionTests(TestCase):
@@ -183,3 +183,44 @@ class SessionTests(TestCase):
         self.assertNotIn("session_generation", self.client.get("/api/v1/auth/me/").json())
         self.assertIn(GENERATION_KEY, self.client.session)
         self.assertIn(HASH_SESSION_KEY, self.client.session)
+
+    def test_device_labels_refresh_from_current_request_without_changing_sign_in_time(self) -> None:
+        original = SignedInSession.objects.get(pk=self.client.session.session_key)
+        other = self.sign_in()
+        phone = (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1"
+        )
+        desktop = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36"
+        )
+        phone_rows = self.client.get("/api/v1/auth/sessions/", HTTP_USER_AGENT=phone).json()[
+            "results"
+        ]
+        phone_row = next(row for row in phone_rows if row["is_current"])
+        self.assertEqual((phone_row["browser"], phone_row["device"]), ("Safari", "iPhone"))
+        desktop_rows = self.client.get("/api/v1/auth/sessions/", HTTP_USER_AGENT=desktop).json()[
+            "results"
+        ]
+        desktop_row = next(row for row in desktop_rows if row["is_current"])
+        self.assertEqual((desktop_row["browser"], desktop_row["device"]), ("Chrome", "Windows"))
+        current = SignedInSession.objects.get(pk=original.pk)
+        self.assertEqual(current.signed_in_at, original.signed_in_at)
+        other_record = SignedInSession.objects.get(pk=other.session.session_key)
+        self.assertEqual((other_record.browser, other_record.device), ("Chrome", "Windows"))
+
+    def test_missing_or_unknown_agent_does_not_erase_known_device_labels(self) -> None:
+        for headers in [{}, {"HTTP_USER_AGENT": "Unrecognized test client"}]:
+            self.client.get("/api/v1/auth/sessions/", **headers)
+            record = SignedInSession.objects.get(pk=self.client.session.session_key)
+            self.assertEqual((record.browser, record.device), ("Chrome", "Windows"))
+
+
+class DeviceDetailsTests(SimpleTestCase):
+    def test_desktop_chrome_is_not_classified_as_safari_or_iphone(self) -> None:
+        agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+        )
+        self.assertEqual(device_details(agent), ("Chrome", "Windows"))

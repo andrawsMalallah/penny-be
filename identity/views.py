@@ -20,6 +20,7 @@ from .password_reset import (
     request_password_reset,
     verify_reset_code,
 )
+from .permissions import IsVerifiedUser
 from .serializers import (
     CodeSerializer,
     CurrentUserSerializer,
@@ -28,6 +29,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     RegistrationSerializer,
     SignedInSessionSerializer,
+    UserSettingsSerializer,
 )
 from .services import (
     GENERIC_REQUEST_MESSAGE,
@@ -38,7 +40,8 @@ from .services import (
     verify_registration,
 )
 from .sessions import revoke_user_sessions, start_user_session
-from .two_factor import begin_password_login
+from .two_factor import begin_password_login, pending_login, valid_login
+from .user_settings import read_user_settings, save_user_settings
 
 
 @require_GET
@@ -104,6 +107,35 @@ class VerifyEmailView(ProtectedAPIView):
 class CurrentUserView(ProtectedAPIView):
     def get(self, request: Request) -> Response:
         return Response(CurrentUserSerializer(request.user).data)
+
+
+class SessionStateView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        # A guest is a normal startup state; private identity still requires verification.
+        if IsVerifiedUser().has_permission(request, self):
+            return Response(
+                {"user": CurrentUserSerializer(request.user).data, "two_factor_pending": False}
+            )
+        challenge = pending_login(request._request)
+        return Response(
+            {
+                "user": None,
+                "two_factor_pending": bool(challenge and valid_login(challenge, challenge.user)),
+            }
+        )
+
+
+class UserSettingsView(ProtectedAPIView):
+    def get(self, request: Request) -> Response:
+        return Response(UserSettingsSerializer(read_user_settings(request.user)).data)
+
+    def post(self, request: Request) -> Response:
+        serializer = UserSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = save_user_settings(request.user, serializer.validated_data)
+        return Response(UserSettingsSerializer(values).data)
 
 
 class LoginView(ProtectedAPIView):

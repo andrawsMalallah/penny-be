@@ -110,7 +110,6 @@ class SessionActivityMiddleware:
                     request.user = current
                     browser, device = device_details(request.META.get("HTTP_USER_AGENT", ""))
                     # Legacy sessions are enrolled without inventing a sign-in time.
-                    # Updating only activity preserves their original device and sign-in details.
                     record, created = SignedInSession.objects.get_or_create(
                         session_id=request.session.session_key,
                         defaults={
@@ -122,7 +121,12 @@ class SessionActivityMiddleware:
                         },
                     )
                     if not created:
-                        SignedInSession.objects.filter(pk=record.pk).update(
-                            last_active_at=timezone.now()
-                        )
+                        # Browser updates/emulation changes must not leave stale descriptions.
+                        # Missing or unrecognized headers must not erase known labels.
+                        updates = {"last_active_at": timezone.now()}
+                        if browser != "Unknown browser":
+                            updates["browser"] = browser
+                        if device != "Unknown device":
+                            updates["device"] = device
+                        SignedInSession.objects.filter(pk=record.pk).update(**updates)
         return self.get_response(request)
