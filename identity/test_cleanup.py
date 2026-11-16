@@ -6,10 +6,52 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import CodeRequestLimit, EmailVerification, PasswordReset, Registration, User
+from .models import (
+    CodeRequestLimit,
+    EmailVerification,
+    PasswordReset,
+    Registration,
+    TwoFactorLogin,
+    TwoFactorSettings,
+    User,
+)
 
 
 class ExpiredCodeCleanupTests(TestCase):
+    def test_two_factor_cleanup_is_bounded_and_preserves_enabled_and_live_secrets(self) -> None:
+        user = User.objects.create_user("2fa-cleanup@example.com", language="en")
+        factor = TwoFactorSettings.objects.create(
+            user=user,
+            enabled=True,
+            secret_ciphertext="active-ciphertext",
+            pending_ciphertext="expired-ciphertext",
+            pending_expires_at=self.now,
+            pending_session_digest="digest",
+        )
+        old_login = TwoFactorLogin.objects.create(
+            user=user, password_auth_hash="hash", session_generation=0, expires_at=self.now
+        )
+        live_login = TwoFactorLogin.objects.create(
+            user=user,
+            password_auth_hash="hash",
+            session_generation=0,
+            expires_at=self.now + timedelta(minutes=5),
+        )
+        self.run_cleanup("--dry-run")
+        factor.refresh_from_db()
+        self.assertTrue(factor.pending_ciphertext)
+        self.run_cleanup("--batch-size=1", "--max-batches=1")
+        factor.refresh_from_db()
+        self.assertTrue(factor.pending_ciphertext)
+        self.run_cleanup("--batch-size=1", "--max-batches=1")
+        factor.refresh_from_db()
+        self.assertFalse(factor.pending_ciphertext)
+        self.assertEqual(factor.secret_ciphertext, "active-ciphertext")
+        self.assertTrue(TwoFactorLogin.objects.filter(pk=old_login.pk).exists())
+        self.run_cleanup()
+        self.assertFalse(TwoFactorLogin.objects.filter(pk=old_login.pk).exists())
+        self.assertTrue(TwoFactorLogin.objects.filter(pk=live_login.pk).exists())
+
     def setUp(self) -> None:
         self.now = timezone.now()
         self.draft = Registration.objects.create(

@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 
 from .errors import InvalidCredentials
-from .models import SignedInSession, User
+from .models import SignedInSession, TwoFactorSettings, User
 
 GENERATION_KEY = "penny_session_generation"
 
@@ -46,11 +46,18 @@ def device_details(user_agent: str) -> tuple[str, str]:
     return browser, device
 
 
-def start_user_session(request: HttpRequest, user: User) -> None:
+def start_user_session(
+    request: HttpRequest, user: User, *, two_factor_verified: bool = False
+) -> None:
     with transaction.atomic():
         current = User.objects.select_for_update().get(pk=user.pk)
         # Authentication may have begun just before a concurrent password reset.
         if current.password != user.password or not current.is_active or not current.email_verified:
+            raise InvalidCredentials()
+        if (
+            not two_factor_verified
+            and TwoFactorSettings.objects.filter(user=current, enabled=True).exists()
+        ):
             raise InvalidCredentials()
         login(request, current, backend="django.contrib.auth.backends.ModelBackend")
         request.session[GENERATION_KEY] = current.session_generation

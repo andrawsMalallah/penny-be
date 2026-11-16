@@ -1,3 +1,4 @@
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth.password_validation import validate_password
@@ -73,3 +74,26 @@ class SignedInSessionSerializer(serializers.ModelSerializer):
 
     def get_is_current(self, instance: SignedInSession) -> bool:
         return instance.session_id == self.context["request"].session.session_key
+
+
+class PasswordConfirmationSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, max_length=256, trim_whitespace=False)
+
+
+class FactorProofSerializer(serializers.Serializer):
+    otp = serializers.CharField(write_only=True, max_length=32, trim_whitespace=True)
+    recovery = serializers.BooleanField(default=False)
+
+    def validate(self, attributes: dict) -> dict:
+        code = attributes["otp"]
+        if attributes["recovery"]:
+            code = code.lower().replace("-", "").replace(" ", "")
+        pattern = r"[a-f0-9]{16}" if attributes["recovery"] else r"[0-9]{6}"
+        if re.fullmatch(pattern, code) is None:
+            raise serializers.ValidationError({"otp": ["Enter a valid security code."]})
+        attributes["otp"] = code
+        return attributes
+
+
+class FactorManagementSerializer(FactorProofSerializer):
+    password = serializers.CharField(write_only=True, max_length=256, trim_whitespace=False)

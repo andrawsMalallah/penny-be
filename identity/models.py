@@ -99,3 +99,26 @@ class SignedInSession(models.Model):
                 fields=["user", "-last_active_at", "session"], name="user_session_activity"
             )
         ]
+
+
+class TwoFactorSettings(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    enabled = models.BooleanField(default=False)
+    secret_ciphertext = models.TextField(blank=True)
+    last_timecode = models.BigIntegerField(default=-1)
+    pending_ciphertext = models.TextField(blank=True)
+    pending_expires_at = models.DateTimeField(null=True, db_index=True)
+    pending_session_digest = models.CharField(max_length=64, blank=True)
+    recovery_hashes = models.JSONField(default=list)
+
+
+class TwoFactorLogin(models.Model):
+    """A password-proven challenge, not an authenticated session."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    password_auth_hash = models.CharField(max_length=64)
+    session_generation = models.PositiveBigIntegerField()
+    expires_at = models.DateTimeField(db_index=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    consumed = models.BooleanField(default=False)

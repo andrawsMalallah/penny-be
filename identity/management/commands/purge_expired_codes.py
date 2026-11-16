@@ -3,7 +3,7 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from identity.models import EmailVerification, PasswordReset
+from identity.models import EmailVerification, PasswordReset, TwoFactorLogin, TwoFactorSettings
 
 
 class Command(BaseCommand):
@@ -29,10 +29,18 @@ class Command(BaseCommand):
             model.objects.filter(expires_at__lte=cutoff).exclude(code_hash="")
             for model in (EmailVerification, PasswordReset)
         ]
+        expired_setups = TwoFactorSettings.objects.filter(pending_expires_at__lte=cutoff).exclude(
+            pending_ciphertext=""
+        )
+        expired_logins = TwoFactorLogin.objects.filter(expires_at__lte=cutoff)
         if options["dry_run"]:
             eligible_count = sum(expired.count() for expired in expired_sets)
             self.stdout.write(
                 f"Expired code hashes eligible: {eligible_count}. Dry run; no changes."
+            )
+            self.stdout.write(
+                f"Expired 2FA setups: {expired_setups.count()}; "
+                f"login challenges: {expired_logins.count()}. Dry run; no changes."
             )
             return
 
@@ -51,7 +59,28 @@ class Command(BaseCommand):
                 remaining_batches -= 1
 
         self.stdout.write(f"Expired code hashes cleared: {cleared}.")
-        if any(expired.exists() for expired in expired_sets):
+        factor_cleared = 0
+        for expired, expiry_field in [
+            (expired_setups, "pending_expires_at"),
+            (expired_logins, "expires_at"),
+        ]:
+            for _ in range(remaining_batches):
+                identifiers = list(
+                    expired.order_by(expiry_field, "pk").values_list("pk", flat=True)[:batch_size]
+                )
+                if not identifiers:
+                    break
+                selected = expired.filter(pk__in=identifiers)
+                if expiry_field == "pending_expires_at":
+                    factor_cleared += selected.update(
+                        pending_ciphertext="", pending_session_digest="", pending_expires_at=None
+                    )
+                else:
+                    removed, _ = selected.delete()
+                    factor_cleared += removed
+                remaining_batches -= 1
+        self.stdout.write(f"Expired 2FA records cleared: {factor_cleared}.")
+        if any(expired.exists() for expired in [*expired_sets, expired_setups, expired_logins]):
             self.stdout.write(
                 "Batch limit reached; remaining expired codes can be cleared next run."
             )

@@ -38,6 +38,7 @@ from .services import (
     verify_registration,
 )
 from .sessions import revoke_user_sessions, start_user_session
+from .two_factor import begin_password_login
 
 
 @require_GET
@@ -115,7 +116,8 @@ class LoginView(ProtectedAPIView):
             **serializer.validated_data, remote_address=request.META.get("REMOTE_ADDR", "unknown")
         )
         request.session.pop("registration_id", None)
-        start_user_session(request._request, user)
+        if begin_password_login(request._request, user):
+            return Response({"two_factor_required": True}, status=202)
         return Response(CurrentUserSerializer(user).data)
 
 

@@ -1,6 +1,6 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Current features are registration, email-code verification, email/password sign-in, session logout, and bounded expired-code maintenance. Password reset, optional authenticator 2FA, account setup, and financial features are planned separately.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Account setup and financial features are planned separately.
 
 ## Development setup
 
@@ -17,6 +17,7 @@ Fill in `.env` locally. It is ignored by Git. Process environment variables take
 | Variable | Purpose |
 | --- | --- |
 | `PENNY_SECRET_KEY` | Unique, stable Django secret |
+| `PENNY_2FA_ENCRYPTION_KEY` | Required stable Fernet key for authenticator secrets; generated separately from Django's secret |
 | `PENNY_LOCAL_HTTP` | `1` for local HTTP; omit or set `0` for HTTPS deployments |
 | `PENNY_ALLOWED_HOSTS` | Comma-separated allowed hostnames/IPs |
 | `PENNY_TRUSTED_ORIGINS` | Comma-separated trusted browser origins |
@@ -68,6 +69,14 @@ Routes begin with `/api/v1/`. Auth responses are private/no-store. For writes, f
 | `auth/logout/` | POST | End session |
 | `auth/sessions/` | GET | Current user's active session metadata; 30 per page (`?page=2`) |
 | `auth/logout-all/` | POST | Revoke every existing session, including this browser; CSRF required |
+| `auth/2fa/` | GET | Current user's enabled status and remaining recovery-code count |
+| `auth/2fa/login/` | GET / POST | Pending password-proven challenge status / complete second-factor sign-in |
+| `auth/2fa/login/cancel/` | POST | Flush the requesting browser's sign-in challenge |
+| `auth/2fa/setup/` | POST | Confirm password and return a new setup key/QR code |
+| `auth/2fa/setup/cancel/` | POST | Clear pending setup belonging to this browser |
+| `auth/2fa/enable/` | POST | Verify an authenticator code, enable 2FA and show recovery codes once |
+| `auth/2fa/disable/` | POST | Disable with password plus authenticator/recovery proof |
+| `auth/2fa/recovery-codes/` | POST | Replace all recovery codes with password plus authenticator/recovery proof |
 | `auth/password-reset/` | POST | Request an email recovery code (`email`) |
 | `auth/password-reset/verify/` | POST | Verify the code in the requesting browser (`code`) |
 | `auth/password-reset/complete/` | POST | Consume verified recovery and set a new password (`password`) |
@@ -90,6 +99,20 @@ The session list returns only browser/device labels, sign-in time, last activity
 
 Sign-out-all locks the user row, advances its revocation counter and deletes tracked sessions. Middleware rejects earlier counters on subsequent requests, including untracked legacy sessions or stale session data saved by an already-running request. A request already authorized before revocation may finish; revocation cannot undo completed work. New sign-ins still work. Password recovery also revokes tracked metadata. Tests cover stale saves and authentication begun before a password change; true PostgreSQL concurrency still requires separate integration verification.
 
+## Authenticator two-factor authentication
+
+Apply additive `identity/0004_twofactorlogin_twofactorsettings` to the intended development database before running this version. Existing users remain opted out. PyOTP handles standard six-digit, 30-second TOTP; the accepted window allows one adjacent time step in each direction. Successful timecodes are stored and cannot be reused. The user row is locked for verification and proof consumption, including recovery codes, so concurrent submissions cannot both authenticate.
+
+`PENNY_2FA_ENCRYPTION_KEY` must be a stable key generated with `cryptography.fernet.Fernet.generate_key()`, stored in the ignored local environment or hosting secrets. Never print it or commit it. Preserve it securely alongside database recovery procedures; replacing it breaks decryption of existing authenticator secrets. Do not derive it from a password or silently regenerate it at startup. Fernet encrypts active and pending secrets; qrcode generates the provisioning image locally, with no external QR service. Setup secrets/QRs appear only in the password-confirmed setup response and stay out of browser storage.
+
+For an enabled account, password sign-in returns HTTP 202 with `two_factor_required: true`. It rotates into an anonymous browser session containing only the challenge reference; no private access is granted yet. Complete `auth/2fa/login/` with `otp` and optional `recovery: true`. The challenge expires after five minutes/five wrong proofs, is bound to the requesting session and snapshots the password auth hash and session generation. Password changes or session revocation invalidate it. The existing password-login limits remain, with shared 2FA limits of 10 attempts/user and 30/direct peer IP per 15 minutes. Failed password checks also consume security-action allowance.
+
+Setup needs the current password, expires after ten minutes and is bound to that browser. Enabling requires a valid new authenticator code. Ten random 16-character hexadecimal recovery codes are shown once; only Django password hashes persist. A code is consumed atomically and never disables 2FA by itself. Regenerating invalidates the entire older set. Disabling or regenerating requires both the password and a fresh authenticator or unused recovery code. Enabling/disabling/regenerating revokes other sessions and pending logins while renewing the current authenticated browser session; refresh CSRF afterward.
+
+Password reset preserves 2FA and unused recovery codes and signs out existing sessions as before. Losing both the authenticator and every recovery code cannot be bypassed by password reset; no support bypass exists. Users must save their recovery codes outside Penny. No trusted-device exemption is implemented.
+
+Local automated verification includes the complete 78-test backend suite against a disposable PostgreSQL database, with simultaneous reuse tests for authenticator and recovery codes. SQLite runs 76 tests and skips those two PostgreSQL-only tests. Tests use isolated email and test-only hashing; browser UI checks use simulated API responses. Actual phone/authenticator scanning and production deployment acceptance are separate.
+
 ## Hourly cleanup
 
 ```powershell
@@ -98,7 +121,7 @@ Sign-out-all locks the user row, advances its revocation counter and deletes tra
 .\.venv\Scripts\python.exe manage.py purge_expired_codes
 ```
 
-Clears expired hashes while retaining coordination rows, active codes, attempt counts, rate limits, drafts and user data. Batches are 500 rows, maximum 20 batches by default, bounded by `--batch-size`/`--max-batches`. Expiry is rechecked during updates. Cleanup does not extend code validity; ten-minute expiry is enforced regardless of scheduling.
+Clears expired hashes and pending 2FA setup ciphertext, and removes expired pre-authentication login challenges. Keeps active authenticator secrets/recovery hashes, live challenges, coordination rows, attempt counts, rate limits, drafts and user data. Batches are 500 rows, maximum 20 batches total across all types, bounded by `--batch-size`/`--max-batches`. Expiry is rechecked during updates. Cleanup does not extend challenge validity; expiry is enforced regardless of scheduling.
 
 For Northflank deployment, use a short scheduled Job with the same backend image, application working directory, command `python manage.py purge_expired_codes`, schedule `0 * * * *`, Forbid concurrency, 60-second deadline, no automatic retries and no run-on-source-change. Supply DB configuration and the Django secret; SMTP credentials/public ports are unnecessary. First inspect with dry-run, then activate after deployment approval. No hosted schedule is included or active in this repository. [Northflank scheduled jobs](https://northflank.com/docs/v1/application/run/run-an-image-once-or-on-a-schedule).
 
@@ -113,6 +136,6 @@ For Northflank deployment, use a short scheduled Job with the same backend image
 .\.venv\Scripts\python.exe -m pip_audit -r requirements.txt
 ```
 
-Isolated tests skip real `.env`, use SQLite/in-memory mail, and include a test-only SMTP-port fixture. They do not prove PostgreSQL concurrency or email delivery. No CI is configured; checks are local commands.
+Default isolated tests skip real `.env`, use SQLite/in-memory mail, and include test-only SMTP-port/encryption-key fixtures. The PostgreSQL-only concurrency tests skip under SQLite; the full suite was also executed separately in a disposable PostgreSQL database with in-memory email. Neither proves email delivery or production readiness. No CI is configured; checks are local commands.
 
 Production serving/container packaging, ingress/CSRF/TLS configuration, stale-draft/session retention, recovery and deployment acceptance remain pending. Configure secrets through platform environment settings, not the local file. Never reset/migrate a production database without separate authorization.

@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -30,6 +31,11 @@ def required_port(name: str) -> int:
 
 
 SECRET_KEY = required_setting("PENNY_SECRET_KEY")
+TWO_FACTOR_ENCRYPTION_KEY = required_setting("PENNY_2FA_ENCRYPTION_KEY")
+try:
+    Fernet(TWO_FACTOR_ENCRYPTION_KEY.encode())
+except ValueError, TypeError:
+    raise ImproperlyConfigured("PENNY_2FA_ENCRYPTION_KEY must be a valid Fernet key.") from None
 DEBUG = False
 LOCAL_HTTP = os.environ.get("PENNY_LOCAL_HTTP") == "1"
 ALLOWED_HOSTS = os.environ.get("PENNY_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
