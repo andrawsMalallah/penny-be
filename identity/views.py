@@ -5,19 +5,29 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_GET
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .password_reset import (
+    GENERIC_RESET_MESSAGE,
+    complete_password_reset,
+    request_password_reset,
+    verify_reset_code,
+)
 from .serializers import (
     CodeSerializer,
     CurrentUserSerializer,
     LoginSerializer,
+    PasswordResetCompleteSerializer,
+    PasswordResetRequestSerializer,
     RegistrationSerializer,
 )
 from .services import (
     GENERIC_REQUEST_MESSAGE,
+    INVALID_CODE_MESSAGE,
     authenticate_user,
     resend_code,
     start_registration,
@@ -106,5 +116,48 @@ class LoginView(ProtectedAPIView):
 
 class LogoutView(ProtectedAPIView):
     def post(self, request: Request) -> Response:
+        logout(request._request)
+        return Response(status=204)
+
+
+class PasswordResetRequestView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        generation = request_password_reset(
+            serializer.validated_data["email"], request.META.get("REMOTE_ADDR", "unknown")
+        )
+        request.session["password_reset_generation"] = generation
+        request.session.pop("password_reset_verified", None)
+        return Response({"detail": GENERIC_RESET_MESSAGE}, status=202)
+
+
+class PasswordResetVerifyView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request) -> Response:
+        serializer = CodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        verify_reset_code(
+            request.session.get("password_reset_generation"), serializer.validated_data["code"]
+        )
+        request.session.cycle_key()
+        request.session["password_reset_verified"] = True
+        return Response(status=204)
+
+
+class PasswordResetCompleteView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordResetCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not request.session.get("password_reset_verified"):
+            raise ValidationError({"code": INVALID_CODE_MESSAGE})
+        complete_password_reset(
+            request.session.get("password_reset_generation"), serializer.validated_data["password"]
+        )
         logout(request._request)
         return Response(status=204)

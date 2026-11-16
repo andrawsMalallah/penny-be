@@ -11,4 +11,7 @@ urlpatterns = [
     path("api/v1/auth/resend-code/", views.ResendCodeView.as_view()),
     path("api/v1/auth/me/", views.CurrentUserView.as_view()),
     path("api/v1/auth/logout/", views.LogoutView.as_view()),
+    path("api/v1/auth/password-reset/", views.PasswordResetRequestView.as_view()),
+    path("api/v1/auth/password-reset/verify/", views.PasswordResetVerifyView.as_view()),
+    path("api/v1/auth/password-reset/complete/", views.PasswordResetCompleteView.as_view()),
 ]

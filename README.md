@@ -66,6 +66,9 @@ Routes begin with `/api/v1/`. Auth responses are private/no-store. For writes, f
 | `auth/login/` | POST | Active verified-user email/password sign-in |
 | `auth/me/` | GET | Current user's safe profile |
 | `auth/logout/` | POST | End session |
+| `auth/password-reset/` | POST | Request an email recovery code (`email`) |
+| `auth/password-reset/verify/` | POST | Verify the code in the requesting browser (`code`) |
+| `auth/password-reset/complete/` | POST | Consume verified recovery and set a new password (`password`) |
 
 Registration fields: `display_name`, `email`, `password`, `language` (`en`/`ar`), `timezone` (IANA name). Password minimum: 12 plus Django validators. Login fields: `email`, `password`. Verification uses six ASCII digits in `code`. Email identities are normalized; existing accounts cannot be overwritten by registration.
 
@@ -74,6 +77,8 @@ Django handles password validation/authentication and session rotation. Unverifi
 Verification hashes/expiry/attempts, rate counters and sessions live in PostgreSQL; no data cache or Redis. Row locks coordinate updates. Codes expire after ten minutes and five wrong attempts. User creation and consumption commit together; superseded sends cannot reactivate old challenges.
 
 Email is intentionally synchronous with a ten-second timeout and no background worker/retries. Failed sends consume allowance and leave a challenge inactive. A replacement invalidates the previous code even if sending fails. Successful SMTP submission is not proof of inbox delivery.
+
+Password reset is separate from registration. Request responses are identical for eligible, unknown, inactive and unverified addresses, including SMTP failure; this response does not confirm delivery. Recovery has separate limits of three requests/email/hour and 20/direct peer IP/hour. Codes are hash-only, expire after ten minutes and allow five wrong attempts. Verification rotates the browser session key and binds recovery proof to that session; completing recovery must happen before the original code expiry. Resending invalidates both the old code and any verified proof. Password validation includes requiring a different password. Completion consumes recovery atomically, flushes the requesting session and changes Django's authentication hash so every earlier authenticated session is denied on its next request. It does not sign in automatically. The frontend refreshes CSRF before subsequent sign-in. No device-list/logout-all screen is implemented yet.
 
 ## Hourly cleanup
 

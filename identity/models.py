@@ -68,3 +68,14 @@ class CodeRequestLimit(models.Model):
     identity_hash = models.CharField(max_length=64, unique=True)
     request_times = models.JSONField(default=list)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+
+class PasswordReset(models.Model):
+    """Separate from registration; one reset generation can be consumed only once."""
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    generation = models.UUIDField(default=uuid.uuid4, unique=True)
+    code_hash = models.CharField(max_length=128, blank=True)
+    expires_at = models.DateTimeField(null=True, db_index=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    verified = models.BooleanField(default=False)

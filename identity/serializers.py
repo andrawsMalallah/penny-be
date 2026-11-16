@@ -45,6 +45,17 @@ class LoginSerializer(serializers.Serializer):
         return value.strip().lower()
 
 
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(max_length=254)
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
+
+class PasswordResetCompleteSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, max_length=256, trim_whitespace=False)
+
+
 class CurrentUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User

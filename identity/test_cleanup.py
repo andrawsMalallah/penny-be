@@ -6,7 +6,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import CodeRequestLimit, EmailVerification, Registration
+from .models import CodeRequestLimit, EmailVerification, PasswordReset, Registration, User
 
 
 class ExpiredCodeCleanupTests(TestCase):
@@ -91,3 +91,16 @@ class ExpiredCodeCleanupTests(TestCase):
         for argument in ["--batch-size=0", "--batch-size=5001", "--max-batches=0"]:
             with self.assertRaises(CommandError):
                 self.run_cleanup(argument)
+
+    def test_reset_hashes_share_the_same_total_batch_budget(self) -> None:
+        user = User.objects.create_user("reset-cleanup@example.com", language="en")
+        reset = PasswordReset.objects.create(
+            user=user, code_hash="expired-reset-hash", expires_at=self.now
+        )
+        self.assertIn("eligible: 2", self.run_cleanup("--dry-run"))
+        self.assertIn("cleared: 1", self.run_cleanup("--batch-size=1", "--max-batches=1"))
+        reset.refresh_from_db()
+        self.assertEqual(reset.code_hash, "expired-reset-hash")
+        self.assertIn("cleared: 1", self.run_cleanup())
+        reset.refresh_from_db()
+        self.assertEqual(reset.code_hash, "")
