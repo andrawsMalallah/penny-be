@@ -1,6 +1,21 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Account setup and financial features are planned separately.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups and opening balances are implemented; financial transactions remain planned separately.
+
+## Accounts and groups
+
+The `finance` app provides verified-user-only, CSRF-protected, no-store APIs. Lists use 30 items per page, stable name/id ordering and eager-loaded group/opening records. All lookups/mutations derive ownership from the session; unknown input fields are rejected.
+
+- `GET/POST /api/v1/accounts/`: list/create money accounts. Create with `name`, nullable `group`, and decimal-string `opening_iqd`/`opening_usd` (nonnegative, up to 16 integer and two fractional digits).
+- `GET/POST /api/v1/accounts/<id>/`: read/update metadata (`name`, nullable `group`) only. Opening money cannot be edited here.
+- `POST /api/v1/accounts/<id>/archive/`: explicit `{ "archived": true }` or false to restore. Opening money/history stays; archival clears its spending default atomically.
+- `GET/POST /api/v1/account-groups/`, `GET/POST /api/v1/account-groups/<id>/`, `POST /api/v1/account-groups/<id>/archive/`: private group list/create/rename/archive/restore. Groups with active accounts cannot be archived. Restore a group's archived accounts only after restoring their group.
+- Lists accept `?page=2&archived=false` (or true), never an unbounded page size. Detail endpoints include archived records owned by the caller. There are no delete endpoints.
+- Settings GET/POST now includes nullable `default_account`; only an active owned account is valid. Explicit null clears it; omitting this field preserves an existing selection. No default is selected automatically, and reads create no rows.
+
+All financial/settings writes lock the user first. OpeningBalance is a separate creation-time, timestamped record, not income. The current balance serializer reads opening amounts because financial transaction features have not been implemented yet; do not infer a completed ledger/reporting engine. Archived money is still held, not erased. Names remain unique per user (case-insensitive), including archived items. Groups are optional and are not seeded.
+
+The additive schema is `finance/0001_initial` plus `identity/0006_usersettings_default_account`; both have been applied to verified local development. Fresh deployments must separately review and apply migrations. Local verification is 114 passing PostgreSQL tests, including three new finance concurrency checks; isolated SQLite skips those, two factor concurrency tests and the maximum-precision money case because SQLite NUMERIC affinity is not exact at that boundary. No production acceptance is implied.
 
 ## Development setup
 
@@ -112,7 +127,7 @@ Setup needs the current password, expires after ten minutes and is bound to that
 
 Password reset preserves 2FA and unused recovery codes and signs out existing sessions as before. Losing both the authenticator and every recovery code cannot be bypassed by password reset; no support bypass exists. Users must save their recovery codes outside Penny. No trusted-device exemption is implemented.
 
-Local automated verification includes the complete 96-test backend suite against a disposable PostgreSQL database, with simultaneous reuse tests for authenticator and recovery codes, private settings, guest-safe session-state and device-label refresh coverage. SQLite passes 94 tests and skips those two PostgreSQL-only tests. Tests use isolated email and test-only hashing; browser UI checks use simulated API responses. Actual phone acceptance and production deployment acceptance are separate.
+Local automated verification includes all 114 backend tests against a disposable PostgreSQL database. Coverage includes simultaneous authenticator/recovery-code reuse, account creation and archive/default/group races, exact opening money, private settings, guest-safe session state and device-label refresh. SQLite passes 108 tests and skips six PostgreSQL-only cases: two factor-reuse tests, three finance concurrency tests and maximum money precision. Tests use isolated email and test-only hashing; browser UI checks use simulated API responses. Actual phone acceptance and production deployment acceptance are separate.
 
 ## Hourly cleanup
 
@@ -132,9 +147,9 @@ Startup uses `auth/session/`, replacing the previous guest `auth/me/` 403 follow
 
 Apply additive `identity/0005_usersettings` to the intended development database before using Settings. It adds a per-user table with optional default currency and exchange rate; existing users, balances and security state are preserved. Production migration requires separate authorization.
 
-`GET /api/v1/settings/` returns the authenticated verified user's `language`, `default_currency` (`IQD`, `USD` or an empty string) and nullable `exchange_rate`. A first read supplies empty preferences without creating a row. `POST` to the same endpoint requires all three fields and CSRF; unsupported fields are rejected. Ownership always comes from the session, never a supplied user ID. Writes lock the user and save account language/preferences atomically. Responses use no-store.
+`GET /api/v1/settings/` returns the authenticated verified user's `language`, `default_currency` (`IQD`, `USD` or an empty string), nullable `exchange_rate` and nullable `default_account`. A first read supplies empty preferences without creating a row. `POST` requires language, currency, rate and CSRF; `default_account` is optional for compatibility, and unsupported fields are rejected. The default must be an active account owned by the user. Omission preserves the selection; explicit null clears it. Ownership always comes from the session, never a supplied user ID. Writes lock the user and save account language/preferences atomically. Responses use no-store. The spending-default field requires the additive Accounts migrations described above.
 
-The optional rate means **1 USD = X IQD**. It is a positive exact decimal string with up to 12 integer digits and six decimal places, or null to clear. JSON numeric rates are rejected to keep float values outside the contract. Database constraints also enforce positive rates and supported currencies. No rate is preset, no history is recalculated, and selecting a default spending account waits for account creation. Appearance remains a browser preference.
+The optional rate means **1 USD = X IQD**. It is a positive exact decimal string with up to 12 integer digits and six decimal places, or null to clear. JSON numeric rates are rejected to keep float values outside the contract. Database constraints also enforce positive rates and supported currencies. No rate is preset and no history is recalculated. A spending default is explicitly selected from existing active accounts; no account is chosen automatically. Appearance remains a browser preference.
 
 ## Checks
 

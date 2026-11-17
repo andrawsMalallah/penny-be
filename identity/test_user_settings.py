@@ -24,7 +24,13 @@ class UserSettingsTests(TestCase):
         response = self.client.get("/api/v1/settings/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.json(), {"language": "en", "default_currency": "", "exchange_rate": None}
+            response.json(),
+            {
+                "language": "en",
+                "default_currency": "",
+                "exchange_rate": None,
+                "default_account": None,
+            },
         )
         self.assertIn("no-store", response["Cache-Control"])
         self.assertFalse(UserSettings.objects.exists())
@@ -32,8 +38,10 @@ class UserSettingsTests(TestCase):
     def test_save_is_private_exact_and_updates_login_language(self) -> None:
         other = User.objects.create_user("other@example.com", language="en", email_verified=True)
         UserSettings.objects.create(user=other, default_currency="IQD", exchange_rate="1500")
-        self.assertEqual(self.save(self.values).json(), self.values)
-        self.assertEqual(self.client.get("/api/v1/settings/").json(), self.values)
+        self.assertEqual(self.save(self.values).json(), {**self.values, "default_account": None})
+        self.assertEqual(
+            self.client.get("/api/v1/settings/").json(), {**self.values, "default_account": None}
+        )
         self.user.refresh_from_db()
         self.assertEqual(self.user.language, "ar")
         self.assertEqual(
@@ -45,7 +53,7 @@ class UserSettingsTests(TestCase):
     def test_rate_can_be_cleared_and_currency_left_unselected(self) -> None:
         self.save(self.values)
         values = {"language": "en", "default_currency": "", "exchange_rate": None}
-        self.assertEqual(self.save(values).json(), values)
+        self.assertEqual(self.save(values).json(), {**values, "default_account": None})
 
     def test_rejects_invalid_rates_without_partial_language_update(self) -> None:
         for rate in [

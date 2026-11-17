@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "rest_framework",
     "identity",
+    "finance",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

@@ -1,9 +1,16 @@
 from django.urls import path
 
+from finance import views as finance
 from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/accounts/", finance.AccountListView.as_view()),
+    path("api/v1/accounts/<int:pk>/", finance.AccountDetailView.as_view()),
+    path("api/v1/accounts/<int:pk>/archive/", finance.AccountArchiveView.as_view()),
+    path("api/v1/account-groups/", finance.GroupListView.as_view()),
+    path("api/v1/account-groups/<int:pk>/", finance.GroupDetailView.as_view()),
+    path("api/v1/account-groups/<int:pk>/archive/", finance.GroupArchiveView.as_view()),
     path("api/v1/health/", views.health),
     path("api/v1/auth/csrf/", views.csrf_token),
     path("api/v1/auth/register/", views.RegisterView.as_view()),

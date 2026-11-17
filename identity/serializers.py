@@ -40,6 +40,7 @@ class CodeSerializer(serializers.Serializer):
 
 
 class UserSettingsSerializer(serializers.Serializer):
+    default_account = serializers.IntegerField(min_value=1, allow_null=True, required=False)
     language = serializers.ChoiceField(choices=["en", "ar"])
     default_currency = serializers.ChoiceField(choices=["", "IQD", "USD"], allow_blank=True)
     exchange_rate = serializers.DecimalField(

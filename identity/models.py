@@ -42,6 +42,9 @@ class User(AbstractUser):
 
 class UserSettings(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
+    default_account = models.ForeignKey(
+        "finance.Account", null=True, blank=True, on_delete=models.PROTECT
+    )
     default_currency = models.CharField(
         max_length=3, choices=[("IQD", "IQD"), ("USD", "USD")], blank=True
     )
