@@ -8,11 +8,12 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
-from identity.models import User
+from identity.models import User, UserSettings
 
+from .exchanges import MAX_MONEY, exchange_amount, received_currency
 from .models import Account, ExpenseCategory, MoneyTransaction, TransactionKind
 
-MAX_BALANCE = Decimal("9999999999999999.99")
+MAX_BALANCE = MAX_MONEY
 
 
 class LedgerConflict(APIException):
@@ -22,7 +23,7 @@ class LedgerConflict(APIException):
 
 def transactions_for(user: User) -> QuerySet[MoneyTransaction]:
     return MoneyTransaction.objects.filter(user=user, deleted_at__isnull=True).select_related(
-        "account__opening", "category"
+        "account__opening", "destination__opening", "category"
     )
 
 
@@ -35,20 +36,45 @@ def check_history(user: User, account_id: int, currency: str) -> None:
     balance = getattr(account.opening, currency.lower())
     days = (
         MoneyTransaction.objects.filter(
-            user=user, account=account, currency=currency, deleted_at__isnull=True
+            Q(account=account) | Q(destination=account),
+            user=user,
+            deleted_at__isnull=True,
         )
+        .filter(Q(currency=currency) | Q(kind=TransactionKind.EXCHANGE))
         .order_by()
         .values("date")
         .annotate(
-            income=Sum("amount", filter=Q(kind=TransactionKind.INCOME), default=Decimal("0")),
-            expense=Sum("amount", filter=Q(kind=TransactionKind.EXPENSE), default=Decimal("0")),
+            income=Sum(
+                "amount",
+                filter=Q(currency=currency)
+                & (Q(kind=TransactionKind.INCOME) | Q(destination=account)),
+                default=Decimal("0"),
+            ),
+            expense=Sum(
+                "amount",
+                filter=Q(
+                    account=account,
+                    currency=currency,
+                    kind__in=[
+                        TransactionKind.EXPENSE,
+                        TransactionKind.TRANSFER,
+                        TransactionKind.EXCHANGE,
+                    ],
+                ),
+                default=Decimal("0"),
+            ),
+            exchanged=Sum(
+                "received_amount",
+                filter=Q(kind=TransactionKind.EXCHANGE) & ~Q(currency=currency),
+                default=Decimal("0"),
+            ),
         )
         .order_by("date")
     )
-    # Date-only entries put all income before expenses; the daily closing balance
-    # is the minimum after income, so checking each day covers every later day.
+    # Date-only entries count incoming funds before outgoing funds on the same day.
+    # Check every later closing balance, including incoming/outgoing transfers.
     for day in days.iterator(chunk_size=500):
-        balance += day["income"] - day["expense"]
+        balance += day["income"] + day["exchanged"] - day["expense"]
         if balance < 0:
             raise ValidationError(
                 {"amount": ["This change leaves insufficient funds on its date or a later date."]}
@@ -60,10 +86,26 @@ def check_history(user: User, account_id: int, currency: str) -> None:
 
 
 def creation_payload(values: dict) -> dict:
-    return {
+    payload = {
         field: str(values[field]) if field in {"date", "amount"} else values[field]
         for field in ("account", "category", "kind", "currency", "amount", "date", "note")
     }
+    # Preserve pre-transfer request payloads so existing explicit retries still match.
+    if values["kind"] == TransactionKind.TRANSFER:
+        payload["destination"] = values["destination"]
+    if values["kind"] == TransactionKind.EXCHANGE:
+        payload["exchange_rate"] = str(values["exchange_rate"])
+        payload["received_amount"] = str(values["received_amount"])
+    return payload
+
+
+def affected_accounts(entry: MoneyTransaction) -> set[tuple[int, str]]:
+    affected = {(entry.account_id, entry.currency)}
+    if entry.destination_id is not None:
+        affected.add((entry.destination_id, entry.currency))
+    if entry.kind == TransactionKind.EXCHANGE:
+        affected.add((entry.account_id, received_currency(entry.currency)))
+    return affected
 
 
 @transaction.atomic
@@ -89,7 +131,7 @@ def save_transaction(
         entry = get_object_or_404(transactions_for(user), pk=entry_id)
         if entry.version != values["version"]:
             raise LedgerConflict()
-        affected = {(entry.account_id, entry.currency)}
+        affected = affected_accounts(entry)
 
     account = (
         Account.objects.filter(user=user, pk=values["account"]).select_related("opening").first()
@@ -103,6 +145,36 @@ def save_transaction(
         raise ValidationError({"date": ["Choose a date on or after the account's opening date."]})
     if values["date"] > timezone.localdate(timezone.now(), ZoneInfo(values["timezone"])):
         raise ValidationError({"date": ["Future transaction dates are not allowed."]})
+    rate = None
+    received = None
+    if values["kind"] == TransactionKind.EXCHANGE:
+        # An existing exchange keeps its historical rate even after Settings is cleared.
+        if (
+            entry.kind != TransactionKind.EXCHANGE
+            and not UserSettings.objects.filter(user=user, exchange_rate__isnull=False).exists()
+        ):
+            raise ValidationError({"exchange_rate": ["Save an exchange rate in Settings first."]})
+        rate = values["exchange_rate"]
+        received = exchange_amount(values["amount"], values["currency"], rate)
+        if received != values["received_amount"]:
+            raise ValidationError({"received_amount": ["Review the recalculated exchange amount."]})
+    destination = None
+    if values["kind"] == TransactionKind.TRANSFER:
+        destination = (
+            Account.objects.filter(user=user, pk=values.get("destination"))
+            .select_related("opening")
+            .first()
+        )
+        if destination is None or (
+            destination.archived and (entry_id is None or entry.destination_id != destination.pk)
+        ):
+            raise ValidationError({"destination": ["Choose an active destination account."]})
+        if destination.pk == account.pk:
+            raise ValidationError({"destination": ["Choose a different account."]})
+        if values["date"] < destination.opening.effective_date:
+            raise ValidationError(
+                {"date": ["Choose a date on or after both accounts' opening dates."]}
+            )
     category = None
     if values["kind"] == TransactionKind.EXPENSE:
         category = ExpenseCategory.objects.filter(user=user, pk=values["category"]).first()
@@ -111,13 +183,16 @@ def save_transaction(
         ):
             raise ValidationError({"category": ["Choose an active expense category."]})
     entry.account = account
+    entry.destination = destination
+    entry.exchange_rate = rate
+    entry.received_amount = received
     entry.category = category
     for field in ("kind", "currency", "amount", "date", "note"):
         setattr(entry, field, values[field])
     if entry_id is not None:
         entry.version += 1
     entry.save()
-    affected.add((account.pk, entry.currency))
+    affected.update(affected_accounts(entry))
     for account_id, currency in affected:
         check_history(user, account_id, currency)
     return transactions_for(user).get(pk=entry.pk), entry_id is None
@@ -133,4 +208,5 @@ def delete_transaction(user: User, entry_id: int, version: int) -> None:
     entry.deleted_at = timezone.now()
     entry.version += 1
     entry.save(update_fields=["deleted_at", "version", "updated_at"])
-    check_history(user, entry.account_id, entry.currency)
+    for account_id, currency in affected_accounts(entry):
+        check_history(user, account_id, currency)

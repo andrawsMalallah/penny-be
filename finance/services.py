@@ -1,7 +1,18 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Case, DecimalField, F, OuterRef, QuerySet, Subquery, Sum, Value, When
+from django.db.models import (
+    Case,
+    DecimalField,
+    F,
+    OuterRef,
+    Q,
+    QuerySet,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -19,14 +30,22 @@ def accounts_for(user: User) -> QuerySet[Account]:
     for currency in ("IQD", "USD"):
         movements = (
             MoneyTransaction.objects.filter(
-                user=user, account=OuterRef("pk"), currency=currency, deleted_at__isnull=True
+                Q(account=OuterRef("pk")) | Q(destination=OuterRef("pk")),
+                user=user,
+                deleted_at__isnull=True,
             )
+            .filter(Q(currency=currency) | Q(kind="exchange"))
             .order_by()
-            .values("account")
+            # Group the correlated aggregate once for this user, across both sides.
+            # Grouping by source account would split incoming transfers into rows.
+            .annotate(owner_id=Value(user.pk))
+            .values("owner_id")
             .annotate(
                 total=Sum(
                     Case(
+                        When(Q(kind="exchange") & ~Q(currency=currency), then=F("received_amount")),
                         When(kind="income", then=F("amount")),
+                        When(destination=OuterRef("pk"), then=F("amount")),
                         default=-F("amount"),
                         output_field=money_field,
                     )

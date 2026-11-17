@@ -1,6 +1,30 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories and income/expense transactions are implemented. Transfers, exchanges, debts and analytics remain separate work.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, account transfers and currency exchanges are implemented. Debts and analytics remain separate work.
+
+## Currency exchanges
+
+Apply reviewed `finance/0005_currency_exchanges` to the intended development database. It adds nullable `exchange_rate` and `received_amount` fields, extends the transaction kind and updates constraints without rewriting existing financial records. Production migration is a separate authorization boundary.
+
+Exchanges use the existing transaction create/detail/delete endpoints with `kind: "exchange"`, one owned `account`, source `currency`, positive decimal-string `amount`, decimal-string `exchange_rate` and reviewed decimal-string `received_amount`, date/timezone and optional note. Destination/category are null. The received currency is the other of IQD/USD. Rate always means **1 USD = X IQD**, up to 12 integer/six fractional places. A new exchange requires a rate saved in private Settings, even when overriding it. The override never updates Settings. Existing exchanges retain their actual rate and may be corrected even after Settings is cleared.
+
+The server computes USD → IQD by multiplication, IQD → USD by division using high-precision Decimal, then rounds received money to **0.01, ROUND_HALF_UP**. Rounded zero and out-of-capacity results are rejected. The submitted reviewed amount must match the server calculation. Both amounts and the actual rate are stored on one exchange record. Changing Settings never recalculates history. Accounts/Overview use live single-query aggregates including both currency legs; income/expense filters exclude exchanges, while either currency filter includes an exchange.
+
+Creates, edits (including account/direction/type changes) and tombstone deletion lock the user and recheck every affected old/new account/currency daily history atomically. Already-spent received funds can block correction/deletion; source overdraft or either-side overflow rolls back the entire mutation. Same-day incoming funds precede outgoing funds. Owned/active references, fixed opening/future dates, UUID retry/original payload, optimistic version and private/CSRF contracts remain in force.
+
+Current verification: **186 tests pass in disposable PostgreSQL**, including four exchange concurrency cases, both directions, halfway rounding, zero/overflow, rate precision, saved-rate requirement/override/history, malformed or mismatched reviewed amounts, all-sides correction/deletion rollback, privacy and DB constraints. Frontend/browser verification is recorded separately; no hosted CI or production acceptance is implied.
+
+## Account transfers
+
+Apply reviewed `finance/0004_account_transfers` to the intended development database. It adds a nullable destination and supporting index, extends transaction kind and replaces constraints; existing financial rows stay unchanged. Production migration requires separate authorization.
+
+Transfers use the same transaction endpoints, with `kind: "transfer"`, source `account`, a different owned `destination`, one `currency` and exact positive decimal-string `amount`. Category is null; destination is null/omitted for income/expenses. There is one linked ledger record, not separate income/expense records. Both accounts must exist by the chosen date. New assignments require active owned accounts; corrections can retain the same archived source/destination. No conversion occurs.
+
+Account balances include incoming/outgoing transfers through a single annotated query. Transfer creates, corrections and confirmed deletions lock the user and validate all old/new account/currency daily histories in one atomic transaction. Same-day incoming funds count before outgoing funds. If any affected balance becomes negative or exceeds capacity, the entire operation rolls back. Deleting/reducing a transfer is rejected when its destination has spent the funds. Existing UUID retry, original-payload, version and tombstone protections also cover transfers; old income/expense create retries remain compatible.
+
+Activity lists a transfer once; its account filter matches either side. `kind=income`/`expense` excludes transfers. Responses add `destination`, `destination_name`, `destination_archived` and nullable `destination_opening_date`, with eager loading and bounded pagination.
+
+Current verification: **171 tests pass in disposable PostgreSQL**, including transfer/spend, duplicate-transfer, stale-edit, delete/destination-spend and destination-archive races, exact decimals, all-sides rollback, privacy and query bounds. Ruff lint/format, Django checks/migration consistency and whitespace checks pass. Local development migration preserves fingerprinted account/opening/transaction data. Physical-device acceptance, hosted CI and production deployment remain separate.
 
 ## Income and expenses
 
@@ -8,7 +32,7 @@ Apply reviewed `finance/0003_openingbalance_effective_date_moneytransaction` onl
 
 Transactions have one account, income/expense kind, IQD/USD currency, positive Decimal(18,2) amount, a fixed Gregorian `YYYY-MM-DD` date and optional note (500 characters). Expenses require exactly one owned category; income has none. Creation/new assignments require active owned accounts/categories. A correction may retain its existing archived references, and history remains readable after archival. Inputs reject unknown fields and require verified session/CSRF for writes. Decimal amounts must cross JSON as strings.
 
-- `GET /api/v1/transactions/`: 30/page, newest date/ID first; optional `account`, `kind`, `currency`, inclusive `start`/`end`, and `page` filters. An omitted filter imposes no limit for that dimension. This Activity endpoint contains income/expense entries; opening balances remain in account details.
+- `GET /api/v1/transactions/`: 30/page, newest date/ID first; optional `account`, `kind`, `currency`, inclusive `start`/`end`, and `page` filters. An omitted filter imposes no limit for that dimension. This Activity endpoint contains income/expense, transfer and exchange entries; opening balances remain in account details.
 - `POST /api/v1/transactions/`: `account`, `kind`, `currency`, `amount`, `date`, device IANA `timezone`, optional `category`/`note`, and UUID `request_id`. Same-user reuse of the same original payload returns the existing transaction without adding funds again; changing that payload or replaying a deleted entry returns 409. The UI retains its request ID in memory for an explicit retry of the same draft.
 - `GET/POST /api/v1/transactions/<id>/`: private read/full correction. Corrections require the last-read integer `version` and transaction fields instead of `request_id`; stale versions return 409.
 - `POST /api/v1/transactions/<id>/delete/`: `{ "version": 1 }`; removes the transaction from Activity and balance calculations, returning 204. An internal tombstone retains the original request ID so a delayed create retry cannot recreate deleted money. It is not returned by detail/list APIs.
@@ -16,7 +40,7 @@ Transactions have one account, income/expense kind, IQD/USD currency, positive D
 
 Today is calculated by the server clock in the submitted validated device timezone; future dates and dates before the fixed account opening date are rejected. Saved dates do not move when device timezone changes. For each account/currency, all same-day income is counted before expenses. Every mutation takes the user-row lock, recomputes streamed daily aggregates, and rejects any negative subsequent closing balance or balance above 9,999,999,999,999,999.99. Moving/correcting an entry checks both old and new account/currency histories. Any failure rolls back the entire mutation. Balances carry forward with no monthly reset. There is no application/browser financial cache or balance write-back table.
 
-Account lists/details now calculate exact current balances as opening money plus live income minus live expenses with correlated aggregates in a single query; transaction responses eager-load account/opening/category. Accounts/groups/categories accept `archived=all` for bounded historical pickers, alongside true/false. No unbounded list endpoints were added.
+Account lists/details calculate exact current balances from opening money, live income/expenses, transfers and both exchange legs with correlated aggregates in a single query; transaction responses eager-load account/destination/opening/category. Accounts/groups/categories accept `archived=all` for bounded historical pickers, alongside true/false. No unbounded list endpoints were added.
 
 Local verification: **152 tests in disposable PostgreSQL**, including concurrent spending, duplicate requests, stale edits, income-deletion/spending races and archive/spending races. Privacy, CSRF, dates, backfill, exact maximum amounts, correction/deletion rollback, pagination/filtering and query bounds are covered. Ruff, Django checks/migration consistency and whitespace checks pass. No production deployment or hosted CI is implied.
 
@@ -41,7 +65,7 @@ The `finance` app provides verified-user-only, CSRF-protected, no-store APIs. Li
 - Lists accept `?page=2&archived=false` (or true), never an unbounded page size. Detail endpoints include archived records owned by the caller. There are no delete endpoints.
 - Settings GET/POST now includes nullable `default_account`; only an active owned account is valid. Explicit null clears it; omitting this field preserves an existing selection. No default is selected automatically, and reads create no rows.
 
-All financial/settings writes lock the user first. OpeningBalance is a separate creation-time, timestamped record, not income. Current balances combine opening amounts and live income/expense entries; transfers/exchanges/debts and reporting remain pending. Archived money is still held, not erased. Names remain unique per user (case-insensitive), including archived items. Groups are optional and are not seeded.
+All financial/settings writes lock the user first. OpeningBalance is a separate creation-time, timestamped record, not income. Current balances combine opening amounts, live income/expenses, transfers and both exchange legs; debts and reporting remain pending. Archived money is still held, not erased. Names remain unique per user (case-insensitive), including archived items. Groups are optional and are not seeded.
 
 The additive schema is `finance/0001_initial` plus `identity/0006_usersettings_default_account`; both have been applied to verified local development. Fresh deployments must separately review and apply migrations. Local verification is 114 passing PostgreSQL tests, including three new finance concurrency checks; isolated SQLite skips those, two factor concurrency tests and the maximum-precision money case because SQLite NUMERIC affinity is not exact at that boundary. No production acceptance is implied.
 

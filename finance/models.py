@@ -85,6 +85,8 @@ class ExpenseCategory(models.Model):
 class TransactionKind(models.TextChoices):
     INCOME = "income", "Income"
     EXPENSE = "expense", "Expense"
+    TRANSFER = "transfer", "Transfer"
+    EXCHANGE = "exchange", "Exchange"
 
 
 class Currency(models.TextChoices):
@@ -95,10 +97,15 @@ class Currency(models.TextChoices):
 class MoneyTransaction(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="transactions")
+    destination = models.ForeignKey(
+        Account, on_delete=models.PROTECT, null=True, related_name="incoming_transfers"
+    )
     category = models.ForeignKey(ExpenseCategory, on_delete=models.PROTECT, null=True)
-    kind = models.CharField(max_length=7, choices=TransactionKind.choices)
+    kind = models.CharField(max_length=8, choices=TransactionKind.choices)
     currency = models.CharField(max_length=3, choices=Currency.choices)
     amount = models.DecimalField(max_digits=18, decimal_places=2)
+    exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True)
+    received_amount = models.DecimalField(max_digits=18, decimal_places=2, null=True)
     date = models.DateField()
     note = models.CharField(max_length=500, blank=True)
     version = models.PositiveIntegerField(default=1)
@@ -113,6 +120,7 @@ class MoneyTransaction(models.Model):
         indexes = [
             models.Index(fields=["user", "deleted_at", "date", "id"]),
             models.Index(fields=["account", "currency", "deleted_at", "date"]),
+            models.Index(fields=["destination", "currency", "deleted_at", "date"]),
             models.Index(fields=["user", "kind", "date"]),
             models.Index(fields=["user", "currency", "date"]),
         ]
@@ -130,8 +138,37 @@ class MoneyTransaction(models.Model):
                 condition=models.Q(kind__in=TransactionKind.values), name="transaction_kind"
             ),
             models.CheckConstraint(
-                condition=models.Q(kind=TransactionKind.INCOME, category__isnull=True)
+                condition=models.Q(
+                    kind__in=[
+                        TransactionKind.INCOME,
+                        TransactionKind.TRANSFER,
+                        TransactionKind.EXCHANGE,
+                    ],
+                    category__isnull=True,
+                )
                 | models.Q(kind=TransactionKind.EXPENSE, category__isnull=False),
                 name="transaction_category_matches_kind",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind=TransactionKind.TRANSFER, destination__isnull=False)
+                    & ~models.Q(account=models.F("destination"))
+                )
+                | (~models.Q(kind=TransactionKind.TRANSFER) & models.Q(destination__isnull=True)),
+                name="transaction_destination_matches_kind",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    kind=TransactionKind.EXCHANGE,
+                    exchange_rate__isnull=False,
+                    exchange_rate__gt=0,
+                    received_amount__isnull=False,
+                    received_amount__gt=0,
+                )
+                | (
+                    ~models.Q(kind=TransactionKind.EXCHANGE)
+                    & models.Q(exchange_rate__isnull=True, received_amount__isnull=True)
+                ),
+                name="transaction_exchange_fields",
             ),
         ]

@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
@@ -28,9 +29,14 @@ class TransactionListView(ProtectedAPIView):
         filters.is_valid(raise_exception=True)
         values = filters.validated_data
         queryset = transactions_for(request.user)
-        for field in ("account", "kind", "currency"):
-            if field in values:
-                queryset = queryset.filter(**{field: values[field]})
+        if "account" in values:
+            queryset = queryset.filter(
+                Q(account=values["account"]) | Q(destination=values["account"])
+            )
+        if "currency" in values:
+            queryset = queryset.filter(Q(currency=values["currency"]) | Q(kind="exchange"))
+        if "kind" in values:
+            queryset = queryset.filter(kind=values["kind"])
         if "start" in values:
             queryset = queryset.filter(date__gte=values["start"])
         if "end" in values:

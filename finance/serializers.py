@@ -114,7 +114,16 @@ def valid_timezone(value: str) -> str:
 
 
 class TransactionInputSerializer(StrictSerializer):
+    exchange_rate = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+        allow_null=True,
+        default=None,
+    )
+    received_amount = MoneyField(allow_null=True, default=None)
     account = serializers.IntegerField(min_value=1)
+    destination = serializers.IntegerField(min_value=1, allow_null=True, default=None)
     category = serializers.IntegerField(min_value=1, allow_null=True, default=None)
     kind = serializers.ChoiceField(choices=TransactionKind.choices)
     currency = serializers.ChoiceField(choices=Currency.choices)
@@ -123,6 +132,15 @@ class TransactionInputSerializer(StrictSerializer):
     note = serializers.CharField(max_length=500, allow_blank=True, default="")
     timezone = serializers.CharField(max_length=100)
 
+    def to_internal_value(self, data: object) -> dict:
+        if (
+            isinstance(data, dict)
+            and data.get("exchange_rate") is not None
+            and not isinstance(data["exchange_rate"], str)
+        ):
+            raise serializers.ValidationError({"exchange_rate": ["Use a decimal string."]})
+        return super().to_internal_value(data)
+
     def validate_timezone(self, value: str) -> str:
         return valid_timezone(value)
 
@@ -130,8 +148,23 @@ class TransactionInputSerializer(StrictSerializer):
         if attrs["amount"] <= 0:
             raise serializers.ValidationError({"amount": ["Enter an amount greater than zero."]})
         if (attrs["kind"] == TransactionKind.EXPENSE) != (attrs["category"] is not None):
+            raise serializers.ValidationError({"category": ["Only expenses require a category."]})
+        if (attrs["kind"] == TransactionKind.TRANSFER) != (attrs["destination"] is not None):
             raise serializers.ValidationError(
-                {"category": ["Expenses require a category; income has no expense category."]}
+                {"destination": ["Only transfers need a destination."]}
+            )
+        if attrs["destination"] == attrs["account"]:
+            raise serializers.ValidationError({"destination": ["Choose a different account."]})
+        if attrs["kind"] == TransactionKind.EXCHANGE:
+            if attrs["exchange_rate"] is None:
+                raise serializers.ValidationError({"exchange_rate": ["Enter the exchange rate."]})
+            if attrs["received_amount"] is None:
+                raise serializers.ValidationError(
+                    {"received_amount": ["Review the received amount first."]}
+                )
+        elif attrs["exchange_rate"] is not None or attrs["received_amount"] is not None:
+            raise serializers.ValidationError(
+                {"exchange_rate": ["Only exchanges have a rate and received amount."]}
             )
         return attrs
 
@@ -165,6 +198,11 @@ class TransactionFilterSerializer(StrictSerializer):
 
 
 class TransactionSerializer(serializers.ModelSerializer):
+    destination_name = serializers.CharField(source="destination.name", default="")
+    destination_archived = serializers.BooleanField(source="destination.archived", default=False)
+    destination_opening_date = serializers.DateField(
+        source="destination.opening.effective_date", default=None
+    )
     account_name = serializers.CharField(source="account.name")
     account_archived = serializers.BooleanField(source="account.archived")
     category_name_en = serializers.CharField(source="category.name_en", default="")
@@ -179,6 +217,10 @@ class TransactionSerializer(serializers.ModelSerializer):
             "account",
             "account_name",
             "account_archived",
+            "destination",
+            "destination_name",
+            "destination_archived",
+            "destination_opening_date",
             "category",
             "category_name_en",
             "category_name_ar",
@@ -186,6 +228,8 @@ class TransactionSerializer(serializers.ModelSerializer):
             "kind",
             "currency",
             "amount",
+            "exchange_rate",
+            "received_amount",
             "date",
             "note",
             "version",
