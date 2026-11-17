@@ -1,15 +1,47 @@
+from decimal import Decimal
+
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Case, DecimalField, F, OuterRef, QuerySet, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from identity.models import User, UserSettings
 
-from .models import Account, AccountGroup, OpeningBalance
+from .ledger import opening_date
+from .models import Account, AccountGroup, MoneyTransaction, OpeningBalance
 
 
 def accounts_for(user: User) -> QuerySet[Account]:
-    return Account.objects.filter(user=user).select_related("group", "opening")
+    money_field = DecimalField(max_digits=30, decimal_places=2)
+    annotations = {}
+    for currency in ("IQD", "USD"):
+        movements = (
+            MoneyTransaction.objects.filter(
+                user=user, account=OuterRef("pk"), currency=currency, deleted_at__isnull=True
+            )
+            .order_by()
+            .values("account")
+            .annotate(
+                total=Sum(
+                    Case(
+                        When(kind="income", then=F("amount")),
+                        default=-F("amount"),
+                        output_field=money_field,
+                    )
+                )
+            )
+            .values("total")
+        )
+        annotations[f"balance_{currency.lower()}"] = F(f"opening__{currency.lower()}") + Coalesce(
+            Subquery(movements, output_field=money_field),
+            Value(Decimal("0")),
+            output_field=money_field,
+        )
+    return (
+        Account.objects.filter(user=user).select_related("group", "opening").annotate(**annotations)
+    )
 
 
 def available_group(user: User, group_id: int | None) -> AccountGroup | None:
@@ -57,7 +89,10 @@ def save_account(user: User, values: dict, account_id: int | None = None) -> Acc
     account.save()
     if account_id is None:
         OpeningBalance.objects.create(
-            account=account, iqd=values["opening_iqd"], usd=values["opening_usd"]
+            account=account,
+            iqd=values["opening_iqd"],
+            usd=values["opening_usd"],
+            effective_date=opening_date(timezone.now(), values.get("timezone", user.timezone)),
         )
     return accounts_for(user).get(pk=account.pk)
 

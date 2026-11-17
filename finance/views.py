@@ -28,10 +28,12 @@ def paginated(
     request: Request,
 ) -> Response:
     archived = request.query_params.get("archived", "false")
-    if archived not in ["true", "false"]:
-        raise ValidationError({"archived": ["Choose true or false."]})
+    if archived not in ["true", "false", "all"]:
+        raise ValidationError({"archived": ["Choose true, false or all."]})
     paginator = PageNumberPagination()
-    page = paginator.paginate_queryset(queryset.filter(archived=archived == "true"), request)
+    if archived != "all":
+        queryset = queryset.filter(archived=archived == "true")
+    page = paginator.paginate_queryset(queryset, request)
     return paginator.get_paginated_response(serializer_class(page, many=True).data)
 
 

@@ -241,7 +241,9 @@ class AccountsTests(TestCase):
     def test_database_rejects_negative_opening_money(self) -> None:
         account = Account.objects.create(user=self.user, name="Invalid")
         with self.assertRaises(IntegrityError), transaction.atomic():
-            OpeningBalance.objects.create(account=account, iqd="-1", usd="0")
+            OpeningBalance.objects.create(
+                account=account, iqd="-1", usd="0", effective_date="2026-01-01"
+            )
 
     def test_every_financial_endpoint_requires_csrf_verified_auth_and_has_no_delete(self) -> None:
         group = self.post("account-groups/", {"name": "Daily"}).json()

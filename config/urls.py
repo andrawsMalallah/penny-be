@@ -1,10 +1,15 @@
 from django.urls import path
 
+from finance import transaction_views as activity
 from finance import views as finance
 from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/transactions/request-id/", activity.TransactionRequestIdView.as_view()),
+    path("api/v1/transactions/", activity.TransactionListView.as_view()),
+    path("api/v1/transactions/<int:pk>/", activity.TransactionDetailView.as_view()),
+    path("api/v1/transactions/<int:pk>/delete/", activity.TransactionDeleteView.as_view()),
     path("api/v1/expense-categories/initialize/", finance.CategoryInitializeView.as_view()),
     path("api/v1/expense-categories/", finance.CategoryListView.as_view()),
     path("api/v1/expense-categories/<int:pk>/", finance.CategoryDetailView.as_view()),
