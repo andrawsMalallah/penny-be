@@ -2,6 +2,16 @@
 
 Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups and opening balances are implemented; financial transactions remain planned separately.
 
+## Expense categories
+
+Apply additive `finance/0002_categorysetup_expensecategory` to the intended development database before using categories. Categories are private to verified users, paginated by 30 and ordered by ID. Each has `name_en`, `name_ar` (up to 100 characters each) and `archived`; at least one trimmed name is required. Names are case-insensitively unique per user within each language, including archived items. Empty optional translations do not conflict. No DELETE endpoint exists.
+
+`POST /api/v1/expense-categories/initialize/` with `{}` creates eight bilingual starters once: Food & groceries, Transport, Housing & bills, Health, Shopping, Entertainment, Education and Other. A separate persistent setup marker prevents recreation after rename/archive; GET never initializes data. Setup is deferred until the category screen is opened, for new and existing users. Creating a custom category directly also initializes starters in the same transaction. Setup and mutations serialize on the finance user-row lock. All writes require CSRF; unsupported fields are rejected.
+
+`GET/POST expense-categories/` lists/creates, `GET/POST expense-categories/<id>/` reads/replaces names, and `POST expense-categories/<id>/archive/` with `{"archived": true}` archives (`false` restores). Lists support `?page=2&archived=true`. Editing requires an active category; omission of either name on replacement clears that translation. Ownership is always derived from the session. Transactions, category assignment and spending reports remain future features.
+
+Local verification: 126 backend tests pass in disposable PostgreSQL, including category setup/name races. Ruff lint/format, Django system checks and migration consistency pass. No production migrations or hosted CI are implied.
+
 ## Accounts and groups
 
 The `finance` app provides verified-user-only, CSRF-protected, no-store APIs. Lists use 30 items per page, stable name/id ordering and eager-loaded group/opening records. All lookups/mutations derive ownership from the session; unknown input fields are rejected.

@@ -5,6 +5,10 @@ from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/expense-categories/initialize/", finance.CategoryInitializeView.as_view()),
+    path("api/v1/expense-categories/", finance.CategoryListView.as_view()),
+    path("api/v1/expense-categories/<int:pk>/", finance.CategoryDetailView.as_view()),
+    path("api/v1/expense-categories/<int:pk>/archive/", finance.CategoryArchiveView.as_view()),
     path("api/v1/accounts/", finance.AccountListView.as_view()),
     path("api/v1/accounts/<int:pk>/", finance.AccountDetailView.as_view()),
     path("api/v1/accounts/<int:pk>/archive/", finance.AccountArchiveView.as_view()),

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import Account, AccountGroup, OpeningBalance
+from .models import Account, AccountGroup, ExpenseCategory, OpeningBalance
 
 
 class StrictSerializer(serializers.Serializer):
@@ -14,6 +14,23 @@ class StrictSerializer(serializers.Serializer):
 
 class GroupInputSerializer(StrictSerializer):
     name = serializers.CharField(max_length=100)
+
+
+class CategoryInputSerializer(StrictSerializer):
+    name_en = serializers.CharField(max_length=100, allow_blank=True, default="")
+    name_ar = serializers.CharField(max_length=100, allow_blank=True, default="")
+
+    def validate(self, attrs: dict) -> dict:
+        if not attrs["name_en"] and not attrs["name_ar"]:
+            raise serializers.ValidationError({"name_en": ["Enter at least one category name."]})
+        return attrs
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseCategory
+        fields = ["id", "name_en", "name_ar", "archived"]
+        read_only_fields = fields
 
 
 class MoneyField(serializers.DecimalField):

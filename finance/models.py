@@ -44,3 +44,38 @@ class OpeningBalance(models.Model):
             models.CheckConstraint(condition=models.Q(iqd__gte=0), name="opening_iqd_nonnegative"),
             models.CheckConstraint(condition=models.Q(usd__gte=0), name="opening_usd_nonnegative"),
         ]
+
+
+class CategorySetup(models.Model):
+    """Persist initialization separately so retired starters are never recreated."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    initialized_at = models.DateTimeField(auto_now_add=True)
+
+
+class ExpenseCategory(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name_en = models.CharField(max_length=100, blank=True)
+    name_ar = models.CharField(max_length=100, blank=True)
+    archived = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [models.Index(fields=["user", "archived", "id"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(name_en="", name_ar=""), name="category_has_name"
+            ),
+            models.UniqueConstraint(
+                Lower("name_en"),
+                "user",
+                condition=~models.Q(name_en=""),
+                name="unique_category_english_name",
+            ),
+            models.UniqueConstraint(
+                Lower("name_ar"),
+                "user",
+                condition=~models.Q(name_ar=""),
+                name="unique_category_arabic_name",
+            ),
+        ]

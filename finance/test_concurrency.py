@@ -11,7 +11,8 @@ from rest_framework.exceptions import ValidationError
 from identity.models import User, UserSettings
 from identity.user_settings import save_user_settings
 
-from .models import Account, AccountGroup, OpeningBalance
+from .categories import initialize_categories, save_category
+from .models import Account, AccountGroup, CategorySetup, ExpenseCategory, OpeningBalance
 from .services import archive_account, archive_group, save_account
 
 
@@ -67,6 +68,22 @@ class AccountConcurrencyTests(TransactionTestCase):
             UserSettings.objects.filter(user=self.user, default_account__isnull=False).exists()
         )
         self.assertEqual(OpeningBalance.objects.get(account=self.account).iqd, Decimal("1.25"))
+
+    def test_simultaneous_category_setup_creates_one_starter_set(self) -> None:
+        results = self.simultaneously(
+            lambda: initialize_categories(self.user), lambda: initialize_categories(self.user)
+        )
+        self.assertEqual(results, [True, True])
+        self.assertEqual(ExpenseCategory.objects.filter(user=self.user).count(), 8)
+        self.assertEqual(CategorySetup.objects.filter(user=self.user).count(), 1)
+
+    def test_simultaneous_category_names_return_validation_without_duplicates(self) -> None:
+        results = self.simultaneously(
+            lambda: save_category(self.user, {"name_en": "Pets", "name_ar": ""}),
+            lambda: save_category(self.user, {"name_en": "PETS", "name_ar": ""}),
+        )
+        self.assertEqual(sorted(results), [False, True])
+        self.assertEqual(ExpenseCategory.objects.filter(user=self.user).count(), 9)
 
     def test_simultaneous_same_name_creates_only_one_complete_account(self) -> None:
         values = {**self.values, "name": "New account"}
