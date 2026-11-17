@@ -1,11 +1,23 @@
 from django.urls import path
 
+from finance import debt_views as debts
 from finance import transaction_views as activity
 from finance import views as finance
 from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/debt-people/", debts.DebtPersonListView.as_view()),
+    path("api/v1/debt-people/<int:pk>/", debts.DebtPersonDetailView.as_view()),
+    path("api/v1/debts/", debts.DebtListView.as_view()),
+    path("api/v1/debts/<int:pk>/", debts.DebtDetailView.as_view()),
+    path("api/v1/debts/<int:pk>/delete/", debts.DebtDeleteView.as_view()),
+    path("api/v1/debts/<int:pk>/repayments/", debts.RepaymentListView.as_view()),
+    path("api/v1/debts/<int:pk>/repayments/<int:entry_id>/", debts.RepaymentDetailView.as_view()),
+    path(
+        "api/v1/debts/<int:pk>/repayments/<int:entry_id>/delete/",
+        debts.RepaymentDeleteView.as_view(),
+    ),
     path("api/v1/transactions/request-id/", activity.TransactionRequestIdView.as_view()),
     path("api/v1/transactions/", activity.TransactionListView.as_view()),
     path("api/v1/transactions/<int:pk>/", activity.TransactionDetailView.as_view()),

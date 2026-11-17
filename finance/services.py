@@ -16,12 +16,17 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 
 from identity.models import User, UserSettings
 
 from .ledger import opening_date
 from .models import Account, AccountGroup, MoneyTransaction, OpeningBalance
+
+
+class AccountTargetConflict(APIException):
+    status_code = 409
+    default_detail = "These targets changed. Cancel and refresh Accounts before editing again."
 
 
 def accounts_for(user: User) -> QuerySet[Account]:
@@ -44,7 +49,7 @@ def accounts_for(user: User) -> QuerySet[Account]:
                 total=Sum(
                     Case(
                         When(Q(kind="exchange") & ~Q(currency=currency), then=F("received_amount")),
-                        When(kind="income", then=F("amount")),
+                        When(kind__in=["income", "debt_in"], then=F("amount")),
                         When(destination=OuterRef("pk"), then=F("amount")),
                         default=-F("amount"),
                         output_field=money_field,
@@ -102,6 +107,18 @@ def save_account(user: User, values: dict, account_id: int | None = None) -> Acc
     )
     if account.archived:
         raise ValidationError({"name": ["Restore this account before editing it."]})
+    target_fields = {"target_iqd", "target_usd"} & values.keys()
+    # Older metadata-only requests preserve targets. Target changes require the read version.
+    if account_id and target_fields:
+        if "target_version" not in values:
+            raise ValidationError(
+                {"target_version": ["Refresh the account before editing targets."]}
+            )
+        if values["target_version"] != account.target_version:
+            raise AccountTargetConflict()
+        account.target_version += 1
+    for field in target_fields:
+        setattr(account, field, values[field])
     unique_name(Account, user, values["name"], account_id)
     account.name = values["name"]
     account.group = available_group(user, values["group"])

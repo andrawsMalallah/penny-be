@@ -7,6 +7,7 @@ from unittest import skipUnless
 from uuid import uuid4
 
 from django.db import close_old_connections, connection
+from django.http import Http404
 from django.test import TransactionTestCase
 from rest_framework.exceptions import APIException
 
@@ -58,6 +59,8 @@ class LedgerConcurrencyTests(TransactionTestCase):
                     action()
                     return True
                 except APIException:
+                    return False
+                except Http404:
                     return False
             finally:
                 close_old_connections()

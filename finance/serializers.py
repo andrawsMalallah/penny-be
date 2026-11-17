@@ -52,8 +52,27 @@ class MoneyField(serializers.DecimalField):
         return super().to_internal_value(data)
 
 
+class TargetMoneyField(MoneyField):
+    def validate_empty_values(self, data: object) -> tuple[bool, object]:
+        # Removal is explicit null; do not let DecimalField silently coerce blank strings.
+        if isinstance(data, str) and not data.strip():
+            self.fail("invalid")
+        return super().validate_empty_values(data)
+
+
 class AccountInputSerializer(GroupInputSerializer):
     group = serializers.IntegerField(min_value=1, allow_null=True)
+    target_iqd = TargetMoneyField(allow_null=True, required=False)
+    target_usd = TargetMoneyField(allow_null=True, required=False)
+    target_version = serializers.IntegerField(min_value=1, required=False)
+
+    def validate(self, attrs: dict) -> dict:
+        for field in ("target_iqd", "target_usd"):
+            if attrs.get(field) is not None and attrs[field] <= 0:
+                raise serializers.ValidationError(
+                    {field: ["Enter a positive target or leave it empty."]}
+                )
+        return attrs
 
 
 class AccountCreateSerializer(AccountInputSerializer):
@@ -100,6 +119,9 @@ class AccountSerializer(serializers.ModelSerializer):
             "created_at",
             "balance_iqd",
             "balance_usd",
+            "target_iqd",
+            "target_usd",
+            "target_version",
             "opening",
         ]
         read_only_fields = fields
@@ -198,6 +220,7 @@ class TransactionFilterSerializer(StrictSerializer):
 
 
 class TransactionSerializer(serializers.ModelSerializer):
+    debt_person_name = serializers.CharField(source="debt.person.name", default="")
     destination_name = serializers.CharField(source="destination.name", default="")
     destination_archived = serializers.BooleanField(source="destination.archived", default=False)
     destination_opening_date = serializers.DateField(
@@ -214,6 +237,9 @@ class TransactionSerializer(serializers.ModelSerializer):
         model = MoneyTransaction
         fields = [
             "id",
+            "debt",
+            "debt_role",
+            "debt_person_name",
             "account",
             "account_name",
             "account_archived",

@@ -1,6 +1,35 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, account transfers and currency exchanges are implemented. Debts and analytics remain separate work.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments and account targets are implemented. Analytics remains separate work.
+
+## Account targets
+
+Any account may have optional independent `target_iqd` and `target_usd` values, returned as decimal strings or null. Create/update through the existing private account endpoints. Values must be positive with at most 16 integer/two fractional digits; explicit null removes a target, omitted fields preserve it. Targets are metadata: they never move/reserve cash, cap balances, create transactions or affect reporting. Archives/restorations preserve targets; restore an account before editing it.
+
+Target updates require the last-read `target_version`; the service acquires the existing user row lock and rejects a stale version with HTTP 409 before saving any metadata. Accepted target updates increment this version, including removals. Older metadata-only requests preserve targets and their version. Money mutations do not change target versions. Client progress is computed from the authoritative live currency balance and may fall after spending or corrections.
+
+Reviewed additive `finance/0008_account_targets` adds two nullable decimals, a version and positive-or-null constraints without changing existing money. Production migration requires separate authorization. Current local verification: 230 PostgreSQL tests, including nine target API/integrity/privacy/precision tests and two target concurrency tests; system/migration checks and Ruff lint/format pass. Physical-device/production acceptance is separate.
+
+## Debts and repayments
+
+Apply reviewed `finance/0006_debts_and_repayments` and `finance/0007_debt_repayment_history_index` only to the intended development database. The first adds debts/people and linked debt movements; the second adds a compound index for bounded repayment history. Production migrations require separate authorization. Existing financial columns remain unchanged.
+
+Each debt belongs to the verified session user and a private person. Person names are trimmed/case-insensitively unique per user; entering a matching name reuses that person. One person may have several independent debts in either currency/direction. `direction` is `owed_to_me` or `i_owe`; `origin` is `existing` (no account/money movement) or `movement` (new lending/borrowing using one owned active account). Amount is a positive exact IQD/USD decimal string. Date is a fixed Gregorian date, never future. Existing debts may use their original date independently of account opening dates. Linked money dates must follow the account opening.
+
+- `GET/POST /api/v1/debts/`: list/create. Lists are 30/page with `person`, `direction`, `currency`, `status` (`open` default, `settled`, `all`) and `page`. Stable person/date/id ordering; no partial-page financial totals. Create fields: `person` ID or `person_name` (exactly one), `direction`, `origin`, nullable `account`, `currency`, `amount`, `date`, optional `note`, device `timezone` and UUID `request_id`.
+- `GET/POST /api/v1/debts/<id>/`: private read/full correction. Update requires the last-read `version` instead of create UUID. Response includes original/repaid/remaining decimal strings, repayment count and person/account labels. All amounts are independent per debt, never netted or converted between currencies/directions.
+- `POST /api/v1/debts/<id>/delete/`: last-read `version`, confirmed by the UI. All repayments must be removed first, even for a settled debt; principal deletion must preserve historical cash balances.
+- `GET/POST /api/v1/debts/<id>/repayments/`: bounded list/create. Create fields: owned active `account`, positive decimal-string `amount`, `date`, optional `note`, `timezone` and UUID `request_id`. Currency/direction are derived from the debt, never supplied by the client.
+- `GET/POST /api/v1/debts/<id>/repayments/<entry_id>/` and `POST .../<entry_id>/delete/`: private read/correction/confirmed deletion, using the last-read payment `version`.
+- `GET /api/v1/debt-people/` and `GET .../<id>/`: bounded private person choices/details. People are created only while saving a debt, not during GET. No unbounded contacts endpoint.
+
+Debt/repayment writes lock the user and atomically update the debt and linked MoneyTransaction. Lending/repaying what the user owes pays out; borrowing/receiving repayment pays in. Repayments cannot exceed the remaining debt or predate its original date/account opening. Debt corrections cannot reduce principal below live repayments or move its date after them; remove repayments before changing currency/direction. Person/account/origin/amount/note corrections remain supported if linked cash histories stay valid. Existing archived account references may remain during corrections; new assignments must be active.
+
+The shared ledger validates every old/new affected account/currency daily history, rejecting negative later balances or supported-capacity overflow with complete rollback. Deleting or reducing received funds that were spent may fail. Debt versions advance after repayment mutations; payment versions protect stale edits. Debt/payment create UUIDs compare original payloads; tombstones prevent delayed retries from recreating deleted money. Debt and ordinary-money UUID namespaces stay independent for principal movements.
+
+Activity exposes linked `debt_in`/`debt_out` rows with safe debt/person/role fields, excluded from income/expense types. Generic transaction create/edit/delete cannot mutate debt movements; use the debt APIs. Accounts/Overview balances include actual debt cash movements in the existing single-query aggregate. Outstanding debts themselves never become spendable balances.
+
+Current verification: **219 PostgreSQL tests** pass, including 24 debt API/integrity/privacy tests and nine simultaneous repayment/correction/delete/spend/archive/duplicate cases. SQLite passes (219 discovered, 36 PostgreSQL-only skips); Ruff lint/format and Django checks/migration consistency pass. Frontend/device/production verification is separate.
 
 ## Currency exchanges
 
@@ -65,7 +94,7 @@ The `finance` app provides verified-user-only, CSRF-protected, no-store APIs. Li
 - Lists accept `?page=2&archived=false` (or true), never an unbounded page size. Detail endpoints include archived records owned by the caller. There are no delete endpoints.
 - Settings GET/POST now includes nullable `default_account`; only an active owned account is valid. Explicit null clears it; omitting this field preserves an existing selection. No default is selected automatically, and reads create no rows.
 
-All financial/settings writes lock the user first. OpeningBalance is a separate creation-time, timestamped record, not income. Current balances combine opening amounts, live income/expenses, transfers and both exchange legs; debts and reporting remain pending. Archived money is still held, not erased. Names remain unique per user (case-insensitive), including archived items. Groups are optional and are not seeded.
+All financial/settings writes lock the user first. OpeningBalance is a separate creation-time, timestamped record, not income. Current balances combine opening amounts, income/expenses, transfers, exchanges and actual debt cash movements; reporting remains pending. Archived money is still held, not erased. Names remain unique per user (case-insensitive), including archived items. Groups are optional and are not seeded.
 
 The additive schema is `finance/0001_initial` plus `identity/0006_usersettings_default_account`; both have been applied to verified local development. Fresh deployments must separately review and apply migrations. Local verification is 114 passing PostgreSQL tests, including three new finance concurrency checks; isolated SQLite skips those, two factor concurrency tests and the maximum-precision money case because SQLite NUMERIC affinity is not exact at that boundary. No production acceptance is implied.
 

@@ -23,7 +23,7 @@ class LedgerConflict(APIException):
 
 def transactions_for(user: User) -> QuerySet[MoneyTransaction]:
     return MoneyTransaction.objects.filter(user=user, deleted_at__isnull=True).select_related(
-        "account__opening", "destination__opening", "category"
+        "account__opening", "destination__opening", "category", "debt__person"
     )
 
 
@@ -47,7 +47,10 @@ def check_history(user: User, account_id: int, currency: str) -> None:
             income=Sum(
                 "amount",
                 filter=Q(currency=currency)
-                & (Q(kind=TransactionKind.INCOME) | Q(destination=account)),
+                & (
+                    Q(kind__in=[TransactionKind.INCOME, TransactionKind.DEBT_IN])
+                    | Q(destination=account)
+                ),
                 default=Decimal("0"),
             ),
             expense=Sum(
@@ -59,6 +62,7 @@ def check_history(user: User, account_id: int, currency: str) -> None:
                         TransactionKind.EXPENSE,
                         TransactionKind.TRANSFER,
                         TransactionKind.EXCHANGE,
+                        TransactionKind.DEBT_OUT,
                     ],
                 ),
                 default=Decimal("0"),
@@ -113,6 +117,8 @@ def save_transaction(
     user: User, values: dict, entry_id: int | None = None
 ) -> tuple[MoneyTransaction, bool]:
     User.objects.select_for_update().get(pk=user.pk)
+    if values["kind"] in {TransactionKind.DEBT_IN, TransactionKind.DEBT_OUT}:
+        raise ValidationError({"kind": ["Manage debt movements in Debts."]})
     if entry_id is None:
         previous = MoneyTransaction.objects.filter(
             user=user, request_id=values["request_id"]
@@ -129,6 +135,8 @@ def save_transaction(
         affected = set()
     else:
         entry = get_object_or_404(transactions_for(user), pk=entry_id)
+        if entry.debt_id is not None:
+            raise ValidationError({"kind": ["Manage debt movements in Debts."]})
         if entry.version != values["version"]:
             raise LedgerConflict()
         affected = affected_accounts(entry)
@@ -202,6 +210,8 @@ def save_transaction(
 def delete_transaction(user: User, entry_id: int, version: int) -> None:
     User.objects.select_for_update().get(pk=user.pk)
     entry = get_object_or_404(transactions_for(user), pk=entry_id)
+    if entry.debt_id is not None:
+        raise ValidationError({"kind": ["Manage debt movements in Debts."]})
     if entry.version != version:
         raise LedgerConflict()
     # Retain a tombstone so a retried create request can never recreate deleted money.
