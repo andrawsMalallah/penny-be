@@ -35,6 +35,8 @@ class TransactionListView(ProtectedAPIView):
             )
         if "currency" in values:
             queryset = queryset.filter(Q(currency=values["currency"]) | Q(kind="exchange"))
+        if "category" in values:
+            queryset = queryset.filter(category=values["category"])
         if "kind" in values:
             queryset = queryset.filter(kind=values["kind"])
         if "start" in values:

@@ -1,5 +1,6 @@
 from django.urls import path
 
+from finance import analytics_views as analytics
 from finance import debt_views as debts
 from finance import transaction_views as activity
 from finance import views as finance
@@ -7,6 +8,27 @@ from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/analytics/", analytics.AnalyticsView.as_view()),
+    path(
+        "api/v1/analytics/accounts/",
+        analytics.AnalyticsBreakdownView.as_view(),
+        {"section": "accounts"},
+    ),
+    path(
+        "api/v1/analytics/groups/",
+        analytics.AnalyticsBreakdownView.as_view(),
+        {"section": "groups"},
+    ),
+    path(
+        "api/v1/analytics/categories/",
+        analytics.AnalyticsBreakdownView.as_view(),
+        {"section": "categories"},
+    ),
+    path(
+        "api/v1/analytics/people/",
+        analytics.AnalyticsBreakdownView.as_view(),
+        {"section": "people"},
+    ),
     path("api/v1/debt-people/", debts.DebtPersonListView.as_view()),
     path("api/v1/debt-people/<int:pk>/", debts.DebtPersonDetailView.as_view()),
     path("api/v1/debts/", debts.DebtListView.as_view()),

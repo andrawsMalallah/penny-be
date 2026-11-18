@@ -1,6 +1,16 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments and account targets are implemented. Analytics remains separate work.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments, account targets and analytics are implemented.
+
+## Analytics
+
+Verified-session-only `GET /api/v1/analytics/?timezone=<IANA zone>&period=this_month` returns current money/debt/net position separately for IQD/USD, selected-period income/spending/difference and previous-period changes, six monthly income/spending points ending with the current month, and the first bounded page of four breakdowns. Presets: `this_month` (default), `previous_month`, `this_year`, `custom`. Custom requires fixed `start`/`end` Gregorian dates with start <= end <= device-zone today; unknown fields, invalid zones/dates and dates supplied with presets are rejected. This-month comparison uses the corresponding prior-month days, this-year the corresponding prior-year days, previous-month compares full calendar months, and custom compares the immediately preceding equal-length interval. Exact comparison dates are returned.
+
+All accounts, including archived/ungrouped ones, contribute to current balances; targets remain metadata. Current debt uses outstanding principal after live repayments, independently per person/direction/currency. Net position is money held + owed-to-me - I-owe and may be negative. Current figures and six-month trends do not move when the selected period changes. Income/spending/trends include only live ordinary income/expense rows, excluding openings, transfers, exchanges and all debt cash. Tombstones never contribute. Aggregates run over all matching records in SQL; money crosses JSON as exact strings, including totals above a single-account capacity.
+
+`GET /api/v1/analytics/accounts/`, `groups/`, `categories/`, `people/` use the same query contract plus `page`, 30 rows per page. Categories aggregate the selected period with bilingual names/archive state; other breakdowns are current. Each report request uses the existing user finance lock for a coherent snapshot; GET does not create or update financial/settings data. The initial report and its four first pages share the same lock. Later explicit page requests are fresh reads. No cache, schema changes or background work.
+
+The summary always returns first pages and rejects a `page` parameter. Use each section's pagination links for subsequent pages; links retain the applied period, dates and timezone. Activity accepts an optional positive `category` ID filter in addition to its existing filters. Owner scoping still applies even for foreign filter IDs. Local verification after audit: 245 PostgreSQL tests including 14 report tests and a report/spending race, Ruff and Django system/migration checks. Backend dependency audit found no known vulnerabilities. Frontend/device/production acceptance is separate.
 
 ## Account targets
 
