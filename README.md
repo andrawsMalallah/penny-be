@@ -1,6 +1,24 @@
 # Penny API
 
-Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments, account targets and analytics are implemented.
+Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments, account targets, analytics and monthly category budgets are implemented.
+
+## Recurring income and expenses
+
+Private verified-session endpoints: `GET/POST /api/v1/recurring/` (30/page, `state=all|active|paused|stopped`), `GET/POST /api/v1/recurring/<id>/`, `POST .../state/`, `GET .../pending/?timezone=<IANA zone>&after=<date>`, `POST .../confirm/` and `POST .../skip/`. Schedule fields: name, income/expense kind, owned account/category, exact currency/amount, note, weekly/monthly/yearly frequency, start_date, optional nullable end_date and timezone. Create adds request_id; edits add version. State requires state/version/timezone. Confirm requires version/scheduled_date/timezone plus nested ordinary transaction fields; skip omits the transaction. Unknown fields are rejected, mutations require CSRF and serializers keep internal payloads/UUIDs private.
+
+Virtual calendar windows calculate due dates without GET writes or jobs; missing dates clamp to month-end while preserving anchors. Pending pages return at most 30 unresolved dates with explicit keyset continuation and bounded scan batches. Metadata edits update pending details, timing edits preserve pending dates and affect future dates only. Pause/stop retain pending, resume skips paused dates and stopped schedules cannot resume/edit. A monotonic lifecycle day prevents overlapping windows across timezone changes. End dates are inclusive.
+
+Only explicit confirmation records an ordinary transaction through the existing atomic ledger. User locks, schedule versions, create UUID/payload checks and unique outcomes prevent duplicates/stale overwrites. Failed reference/date/funds checks roll back money/outcome/version together. Skips never move money. Later ordinary transaction corrections/deletion do not reopen settled occurrences or change schedules. No financial cache, scheduler or automatic mutation replay.
+
+Additive finance/0010 creates three recurring tables, applied only to verified loopback development with every pre-existing finance/budget column fingerprint-preserved. Production migration is separate. Local verification: 279 PostgreSQL tests including 19 recurring API/model/calendar/lifecycle/concurrency cases; Ruff/system/migration checks pass. Physical-device acceptance/publication remain pending; no packages changed.
+
+## Monthly category budgets
+
+Verified-user endpoints: `GET /api/v1/budgets/?month=YYYY-MM&page=1` (30/page), `GET /api/v1/budgets/<category>/?month=YYYY-MM` and CSRF-protected `POST /api/v1/budgets/<category>/`. POST requires `month`, last-read `version` (0 before first schedule), `scope` (`month` or `future`) and both `limit_iqd`/`limit_usd` as positive decimal strings or null. Both null removes limits. Foreign categories return 404; stale versions return 409 before writes. User-row locks serialize reads/writes with finance mutations. GET never initializes data.
+
+Rules repeat from their starting month without a scheduled job or rollover of unused allowance. An explicit month override wins, including null removal. Future scope replaces later planned limits/exceptions for that category, leaving earlier months unchanged; removal retains the schedule/version. Only ordinary live expenses in that fixed calendar month count, across all accounts. Currencies stay separate, overspending is informational and never affects cash/ledger behavior. Corrections/deletions affect subsequent fresh reports. Archived category history remains available; restore before creating its first schedule.
+
+Additive `finance/0009_budgetschedule_budgetrule` creates two tables. Applied only to verified local development with every existing finance column fingerprint-preserved; production migrations remain separately controlled. Current local verification: 260 PostgreSQL tests (15 budget API/model/concurrency cases), Ruff/system/migration checks. No package changes or publication authorization.
 
 ## Analytics
 

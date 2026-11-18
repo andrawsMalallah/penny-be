@@ -93,6 +93,37 @@ class ExpenseCategory(models.Model):
         ]
 
 
+class BudgetSchedule(models.Model):
+    """Keep the version even after removal, preventing delayed saves from reviving limits."""
+
+    category = models.OneToOneField(ExpenseCategory, on_delete=models.CASCADE)
+    version = models.PositiveIntegerField(default=0)
+
+
+class BudgetRule(models.Model):
+    schedule = models.ForeignKey(BudgetSchedule, on_delete=models.CASCADE, related_name="rules")
+    month = models.DateField()
+    recurring = models.BooleanField()
+    limit_iqd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    limit_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "month", "recurring"], name="unique_budget_rule"
+            ),
+            models.CheckConstraint(condition=models.Q(month__day=1), name="budget_first_of_month"),
+            models.CheckConstraint(
+                condition=models.Q(limit_iqd__isnull=True) | models.Q(limit_iqd__gt=0),
+                name="budget_iqd_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(limit_usd__isnull=True) | models.Q(limit_usd__gt=0),
+                name="budget_usd_positive",
+            ),
+        ]
+
+
 class TransactionKind(models.TextChoices):
     INCOME = "income", "Income"
     EXPENSE = "expense", "Expense"
@@ -267,5 +298,115 @@ class MoneyTransaction(models.Model):
                 fields=["debt"],
                 condition=models.Q(debt_role="principal"),
                 name="one_debt_principal_movement",
+            ),
+        ]
+
+
+class RecurringFrequency(models.TextChoices):
+    WEEKLY = "weekly", "Weekly"
+    MONTHLY = "monthly", "Monthly"
+    YEARLY = "yearly", "Yearly"
+
+
+class RecurringState(models.TextChoices):
+    ACTIVE = "active", "Active"
+    PAUSED = "paused", "Paused"
+    STOPPED = "stopped", "Stopped"
+
+
+class RecurringSchedule(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    kind = models.CharField(max_length=7, choices=[("income", "Income"), ("expense", "Expense")])
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    category = models.ForeignKey(ExpenseCategory, on_delete=models.PROTECT, null=True)
+    currency = models.CharField(max_length=3, choices=Currency.choices)
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
+    note = models.CharField(max_length=500, blank=True)
+    frequency = models.CharField(max_length=7, choices=RecurringFrequency.choices)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True)
+    timing_boundary = models.DateField(null=True)
+    state = models.CharField(
+        max_length=7, choices=RecurringState.choices, default=RecurringState.ACTIVE
+    )
+    version = models.PositiveIntegerField(default=1)
+    request_id = models.UUIDField()
+    creation_payload = models.JSONField()
+
+    class Meta:
+        ordering = ["name", "id"]
+        indexes = [models.Index(fields=["user", "state", "name", "id"])]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "request_id"], name="unique_recurring_request"),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="recurring_positive_amount"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(currency__in=Currency.values), name="recurring_currency"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frequency__in=RecurringFrequency.values),
+                name="recurring_frequency",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(state__in=RecurringState.values), name="recurring_state"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(kind="income", category__isnull=True)
+                | models.Q(kind="expense", category__isnull=False),
+                name="recurring_kind_category",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(end_date__isnull=True)
+                | models.Q(end_date__gte=models.F("start_date")),
+                name="recurring_date_range",
+            ),
+        ]
+
+
+class RecurringWindow(models.Model):
+    """Timing history keeps pending dates fixed across edits, pauses and stops."""
+
+    schedule = models.ForeignKey(
+        RecurringSchedule, on_delete=models.CASCADE, related_name="windows"
+    )
+    frequency = models.CharField(max_length=7, choices=RecurringFrequency.choices)
+    anchor = models.DateField()
+    begins = models.DateField()
+    ends = models.DateField(null=True)
+
+    class Meta:
+        ordering = ["begins", "id"]
+        indexes = [models.Index(fields=["schedule", "begins", "ends"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(ends__isnull=True) | models.Q(ends__gte=models.F("begins")),
+                name="recurring_window_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(frequency__in=RecurringFrequency.values),
+                name="recurring_window_frequency",
+            ),
+        ]
+
+
+class RecurringOutcome(models.Model):
+    """A settled slot stays settled after an ordinary transaction is corrected/deleted."""
+
+    schedule = models.ForeignKey(RecurringSchedule, on_delete=models.CASCADE)
+    scheduled_date = models.DateField()
+    skipped = models.BooleanField(default=False)
+    transaction = models.OneToOneField(MoneyTransaction, null=True, on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "scheduled_date"], name="unique_recurring_slot"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(skipped=True, transaction__isnull=True)
+                | models.Q(skipped=False, transaction__isnull=False),
+                name="recurring_outcome_kind",
             ),
         ]

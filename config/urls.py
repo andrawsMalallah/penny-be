@@ -1,13 +1,23 @@
 from django.urls import path
 
 from finance import analytics_views as analytics
+from finance import budget_views as budgets
 from finance import debt_views as debts
+from finance import recurring_views as recurring
 from finance import transaction_views as activity
 from finance import views as finance
 from identity import two_factor_views as factor
 from identity import views
 
 urlpatterns = [
+    path("api/v1/recurring/", recurring.ScheduleListView.as_view()),
+    path("api/v1/recurring/<int:pk>/", recurring.ScheduleDetailView.as_view()),
+    path("api/v1/recurring/<int:pk>/state/", recurring.ScheduleStateView.as_view()),
+    path("api/v1/recurring/<int:pk>/pending/", recurring.PendingView.as_view()),
+    path("api/v1/recurring/<int:pk>/confirm/", recurring.ResolveView.as_view()),
+    path("api/v1/recurring/<int:pk>/skip/", recurring.ResolveView.as_view(), {"skip": True}),
+    path("api/v1/budgets/", budgets.BudgetListView.as_view()),
+    path("api/v1/budgets/<int:pk>/", budgets.BudgetDetailView.as_view()),
     path("api/v1/analytics/", analytics.AnalyticsView.as_view()),
     path(
         "api/v1/analytics/accounts/",
