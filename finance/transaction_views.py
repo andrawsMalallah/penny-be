@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from django.db.models import Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
@@ -10,12 +10,15 @@ from identity.views import ProtectedAPIView
 
 from .ledger import delete_transaction, save_transaction, transactions_for
 from .serializers import (
+    ActivityFilterSerializer,
     TransactionCreateSerializer,
     TransactionDeleteSerializer,
+    TransactionExportSerializer,
     TransactionFilterSerializer,
     TransactionSerializer,
     TransactionUpdateSerializer,
 )
+from .transaction_export import export_transactions
 
 
 class TransactionRequestIdView(ProtectedAPIView):
@@ -27,22 +30,7 @@ class TransactionListView(ProtectedAPIView):
     def get(self, request: Request) -> Response:
         filters = TransactionFilterSerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
-        values = filters.validated_data
-        queryset = transactions_for(request.user)
-        if "account" in values:
-            queryset = queryset.filter(
-                Q(account=values["account"]) | Q(destination=values["account"])
-            )
-        if "currency" in values:
-            queryset = queryset.filter(Q(currency=values["currency"]) | Q(kind="exchange"))
-        if "category" in values:
-            queryset = queryset.filter(category=values["category"])
-        if "kind" in values:
-            queryset = queryset.filter(kind=values["kind"])
-        if "start" in values:
-            queryset = queryset.filter(date__gte=values["start"])
-        if "end" in values:
-            queryset = queryset.filter(date__lte=values["end"])
+        queryset = transactions_for(request.user, filters.validated_data)
         paginator = PageNumberPagination()
         page = paginator.paginate_queryset(queryset, request)
         return paginator.get_paginated_response(TransactionSerializer(page, many=True).data)
@@ -52,6 +40,29 @@ class TransactionListView(ProtectedAPIView):
         serializer.is_valid(raise_exception=True)
         entry, created = save_transaction(request.user, serializer.validated_data)
         return Response(TransactionSerializer(entry).data, status=201 if created else 200)
+
+
+class TransactionExportCountView(ProtectedAPIView):
+    def get(self, request: Request) -> Response:
+        serializer = ActivityFilterSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            {"count": transactions_for(request.user, serializer.validated_data).count()}
+        )
+
+
+class TransactionExportView(ProtectedAPIView):
+    def get(self, request: Request) -> FileResponse:
+        serializer = TransactionExportSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        document = export_transactions(request.user, values)
+        return FileResponse(
+            document,
+            as_attachment=True,
+            filename=f"penny-activity-{values['language']}.csv",
+            content_type="text/csv; charset=utf-8",
+        )
 
 
 class TransactionDetailView(ProtectedAPIView):

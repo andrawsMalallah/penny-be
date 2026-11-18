@@ -21,10 +21,23 @@ class LedgerConflict(APIException):
     default_detail = "This transaction changed. Refresh Activity before trying again."
 
 
-def transactions_for(user: User) -> QuerySet[MoneyTransaction]:
-    return MoneyTransaction.objects.filter(user=user, deleted_at__isnull=True).select_related(
+def transactions_for(user: User, filters: dict | None = None) -> QuerySet[MoneyTransaction]:
+    queryset = MoneyTransaction.objects.filter(user=user, deleted_at__isnull=True).select_related(
         "account__opening", "destination__opening", "category", "debt__person"
     )
+    values = filters or {}
+    if "account" in values:
+        queryset = queryset.filter(Q(account=values["account"]) | Q(destination=values["account"]))
+    if "currency" in values:
+        queryset = queryset.filter(Q(currency=values["currency"]) | Q(kind="exchange"))
+    for field in ("category", "kind"):
+        if field in values:
+            queryset = queryset.filter(**{field: values[field]})
+    if "start" in values:
+        queryset = queryset.filter(date__gte=values["start"])
+    if "end" in values:
+        queryset = queryset.filter(date__lte=values["end"])
+    return queryset
 
 
 def opening_date(recorded_at: datetime, zone: str) -> date:

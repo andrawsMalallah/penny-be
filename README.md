@@ -2,6 +2,16 @@
 
 Django REST Framework API for Penny's web expense tracker. Authentication includes registration, email-code verification, sign-in, password recovery, session management, optional authenticator 2FA and bounded security-state maintenance. Private accounts/groups, opening balances, expense categories, income/expenses, transfers, exchanges, debts, repayments, account targets, analytics and monthly category budgets are implemented.
 
+## Activity CSV export
+
+Verified sessions can read `GET /api/v1/transactions/export/count/` with the same optional `account`, `category`, `kind`, `currency`, `start` and `end` filters as Activity. `GET /api/v1/transactions/export/` additionally requires `language=en|ar` and the reviewed `expected_count`. Pagination and unknown fields are rejected. A changed count returns 409; review the count and explicitly download again. Results reflect current data at generation time, including edits that leave the count unchanged.
+
+The CSV contains every matching live Activity entry in date/id descending order, one row each, including transfers, exchanges and linked debt cash. Openings, deleted transactions, pending recurring occurrences and other users' data are excluded. Both transfer accounts and both exchange currencies follow Activity's existing filter semantics. Archived references remain readable. Amounts are positive exact decimal strings distinguished by transaction type; currencies are never combined. Columns: fixed date, localized type, account, destination account, category with language fallback, currency, amount, actual exchange rate, received currency/amount, person, debt role and note.
+
+UTF-8 BOM, CRLF records and standard CSV quoting support Arabic spreadsheet imports. Formula-like user text is prefixed with an apostrophe. Import large amount columns as text to avoid spreadsheet numeric rounding; the CSV itself preserves every digit. Both endpoints are private/no-store and perform no financial initialization or mutation.
+
+Generation holds the existing finance user lock for a coherent current snapshot, reads selected joined columns in batches of 500 and spills beyond 1 MiB into an automatically cleaned temporary file. The lock is released before FileResponse sends the file; slow network downloads do not hold it. Generation failures close the temporary file and return no partial successful CSV. Exports are synchronous; very large histories can occupy a request and briefly delay the same user's finance writes. There is no stored export/job, new dependency, schema change or background worker.
+
 ## Recurring income and expenses
 
 Private verified-session endpoints: `GET/POST /api/v1/recurring/` (30/page, `state=all|active|paused|stopped`), `GET/POST /api/v1/recurring/<id>/`, `POST .../state/`, `GET .../pending/?timezone=<IANA zone>&after=<date>`, `POST .../confirm/` and `POST .../skip/`. Schedule fields: name, income/expense kind, owned account/category, exact currency/amount, note, weekly/monthly/yearly frequency, start_date, optional nullable end_date and timezone. Create adds request_id; edits add version. State requires state/version/timezone. Confirm requires version/scheduled_date/timezone plus nested ordinary transaction fields; skip omits the transaction. Unknown fields are rejected, mutations require CSRF and serializers keep internal payloads/UUIDs private.

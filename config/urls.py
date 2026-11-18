@@ -51,6 +51,8 @@ urlpatterns = [
         debts.RepaymentDeleteView.as_view(),
     ),
     path("api/v1/transactions/request-id/", activity.TransactionRequestIdView.as_view()),
+    path("api/v1/transactions/export/count/", activity.TransactionExportCountView.as_view()),
+    path("api/v1/transactions/export/", activity.TransactionExportView.as_view()),
     path("api/v1/transactions/", activity.TransactionListView.as_view()),
     path("api/v1/transactions/<int:pk>/", activity.TransactionDetailView.as_view()),
     path("api/v1/transactions/<int:pk>/delete/", activity.TransactionDeleteView.as_view()),

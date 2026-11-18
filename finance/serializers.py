@@ -203,8 +203,7 @@ class TransactionDeleteSerializer(StrictSerializer):
     version = serializers.IntegerField(min_value=1)
 
 
-class TransactionFilterSerializer(StrictSerializer):
-    page = serializers.IntegerField(min_value=1, required=False)
+class ActivityFilterSerializer(StrictSerializer):
     account = serializers.IntegerField(min_value=1, required=False)
     category = serializers.IntegerField(min_value=1, required=False)
     kind = serializers.ChoiceField(choices=TransactionKind.choices, required=False)
@@ -218,6 +217,15 @@ class TransactionFilterSerializer(StrictSerializer):
                 {"end": ["Choose an end date on or after the start date."]}
             )
         return attrs
+
+
+class TransactionFilterSerializer(ActivityFilterSerializer):
+    page = serializers.IntegerField(min_value=1, required=False)
+
+
+class TransactionExportSerializer(ActivityFilterSerializer):
+    language = serializers.ChoiceField(choices=["en", "ar"])
+    expected_count = serializers.IntegerField(min_value=0)
 
 
 class TransactionSerializer(serializers.ModelSerializer):
