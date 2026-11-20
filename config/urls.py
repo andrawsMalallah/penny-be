@@ -1,13 +1,16 @@
 from django.urls import path
 
-from finance import analytics_views as analytics
-from finance import budget_views as budgets
-from finance import debt_views as debts
-from finance import recurring_views as recurring
-from finance import transaction_views as activity
-from finance import views as finance
-from identity import two_factor_views as factor
-from identity import views
+import app.finance.api.accounts as finance
+import app.finance.api.analytics as analytics
+import app.finance.api.budgets as budgets
+import app.finance.api.debts as debts
+import app.finance.api.recurring as recurring
+import app.finance.api.transactions as activity
+import app.identity.api.two_factor as factor
+import app.identity.api.views as views
+from app.finance.api.monthly_review import MonthlyReviewView
+
+from .health import ready
 
 urlpatterns = [
     path("api/v1/recurring/", recurring.ScheduleListView.as_view()),
@@ -19,6 +22,7 @@ urlpatterns = [
     path("api/v1/budgets/", budgets.BudgetListView.as_view()),
     path("api/v1/budgets/<int:pk>/", budgets.BudgetDetailView.as_view()),
     path("api/v1/analytics/", analytics.AnalyticsView.as_view()),
+    path("api/v1/analytics/monthly/", MonthlyReviewView.as_view()),
     path(
         "api/v1/analytics/accounts/",
         analytics.AnalyticsBreakdownView.as_view(),
@@ -67,6 +71,7 @@ urlpatterns = [
     path("api/v1/account-groups/<int:pk>/", finance.GroupDetailView.as_view()),
     path("api/v1/account-groups/<int:pk>/archive/", finance.GroupArchiveView.as_view()),
     path("api/v1/health/", views.health),
+    path("api/v1/ready/", ready),
     path("api/v1/auth/csrf/", views.csrf_token),
     path("api/v1/auth/register/", views.RegisterView.as_view()),
     path("api/v1/auth/login/", views.LoginView.as_view()),

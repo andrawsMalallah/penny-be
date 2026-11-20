@@ -8,7 +8,7 @@ os.environ["PENNY_SKIP_DOTENV"] = "1"
 os.environ.setdefault("PENNY_EMAIL_PORT", "1025")  # Fixture only; tests send no SMTP traffic.
 os.environ["PENNY_2FA_ENCRYPTION_KEY"] = urlsafe_b64encode(b"t" * 32).decode()  # Test fixture only.
 
-from .settings import *  # noqa: E402
+from config.settings import *
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"

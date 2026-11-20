@@ -47,8 +47,8 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "rest_framework",
-    "identity",
-    "finance",
+    "app.identity.apps.IdentityConfig",
+    "app.finance.apps.FinanceConfig",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -56,7 +56,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "identity.sessions.SessionActivityMiddleware",
+    "app.identity.services.sessions.SessionActivityMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
@@ -85,12 +85,12 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
-    "DEFAULT_PERMISSION_CLASSES": ["identity.permissions.IsVerifiedUser"],
+    "DEFAULT_PERMISSION_CLASSES": ["app.identity.permissions.IsVerifiedUser"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 30,
-    "EXCEPTION_HANDLER": "identity.errors.exception_handler",
+    "EXCEPTION_HANDLER": "app.identity.errors.exception_handler",
 }
 LANGUAGE_CODE = "en"
 TIME_ZONE = "UTC"
@@ -103,11 +103,15 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 60 * 60 * 12
 CSRF_COOKIE_SECURE = not LOCAL_HTTP
 CSRF_COOKIE_HTTPONLY = True
-CSRF_FAILURE_VIEW = "identity.views.csrf_failure"
+CSRF_FAILURE_VIEW = "app.identity.api.views.csrf_failure"
 SECURE_SSL_REDIRECT = not LOCAL_HTTP
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
+# Apply HSTS only to HTTPS deployments; local HTTP previews stay usable.
+SECURE_HSTS_SECONDS = 0 if LOCAL_HTTP else 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
 DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024
 # No shared data cache; each app/page load reads the API and authoritative database.
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}

@@ -8,4 +8,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "config/test_settings.py" = ["F403", "F405"]
-"identity/migrations/*.py" = ["E501"]
+"app/identity/migrations/*.py" = ["E501"]
