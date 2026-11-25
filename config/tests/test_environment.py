@@ -34,7 +34,13 @@ class RequiredEnvironmentTests(SimpleTestCase):
 
 
 class HostedEnvironmentTests(SimpleTestCase):
-    def load_settings(self, hosted: bool) -> dict:
+    def load_settings(
+        self,
+        hosted: str | None = None,
+        *,
+        proxy_opt_in: bool = True,
+        extra_environment: dict[str, str] | None = None,
+    ) -> dict:
         environment = {
             "PENNY_SKIP_DOTENV": "1",
             "PENNY_SECRET_KEY": "test-only-secret",
@@ -43,19 +49,37 @@ class HostedEnvironmentTests(SimpleTestCase):
             "PENNY_BREVO_API_KEY": "test-only-api-key",
             "PENNY_EMAIL_FROM": "sender@example.com",
         }
-        if hosted:
+        if hosted == "render":
             environment.update(
                 {
                     "RENDER_EXTERNAL_HOSTNAME": "example.onrender.com",
-                    "PENNY_TRUST_RENDER_PROXY": "1",
                 }
             )
+            if proxy_opt_in:
+                environment["PENNY_TRUST_RENDER_PROXY"] = "1"
+        elif hosted == "northflank":
+            environment["NF_HOSTS"] = "app--example.code.run"
+            if proxy_opt_in:
+                environment["PENNY_TRUST_NORTHFLANK_PROXY"] = "1"
+        environment.update(extra_environment or {})
         with patch.dict(os.environ, environment, clear=True):
             return runpy.run_path(str(Path(__file__).resolve().parents[1] / "settings.py"))
 
-    def test_render_proxy_trust_requires_explicit_hosted_setting(self) -> None:
-        local = self.load_settings(hosted=False)
-        hosted = self.load_settings(hosted=True)
+    def test_proxy_trust_requires_hosted_identity_and_explicit_opt_in(self) -> None:
+        local = self.load_settings()
+        render = self.load_settings("render")
+        northflank = self.load_settings("northflank")
         self.assertNotIn("SECURE_PROXY_SSL_HEADER", local)
-        self.assertEqual(hosted["SECURE_PROXY_SSL_HEADER"], ("HTTP_X_FORWARDED_PROTO", "https"))
-        self.assertEqual(hosted["EMAIL_BACKEND"], "config.brevo_email.BrevoEmailBackend")
+        for hosted in (render, northflank):
+            self.assertEqual(hosted["SECURE_PROXY_SSL_HEADER"], ("HTTP_X_FORWARDED_PROTO", "https"))
+            self.assertEqual(hosted["EMAIL_BACKEND"], "config.brevo_email.BrevoEmailBackend")
+        self.assertNotIn(
+            "SECURE_PROXY_SSL_HEADER", self.load_settings("render", proxy_opt_in=False)
+        )
+        self.assertNotIn(
+            "SECURE_PROXY_SSL_HEADER", self.load_settings("northflank", proxy_opt_in=False)
+        )
+
+    def test_northflank_proxy_opt_in_requires_northflank_runtime(self) -> None:
+        settings = self.load_settings(extra_environment={"PENNY_TRUST_NORTHFLANK_PROXY": "1"})
+        self.assertNotIn("SECURE_PROXY_SSL_HEADER", settings)

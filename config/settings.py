@@ -42,8 +42,14 @@ ALLOWED_HOSTS = os.environ.get("PENNY_ALLOWED_HOSTS", "localhost,127.0.0.1").spl
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get("PENNY_TRUSTED_ORIGINS", "").split(",") if origin
 ]
-# Only enable this behind Render's HTTPS ingress, which supplies the original scheme.
-if os.environ.get("PENNY_TRUST_RENDER_PROXY") == "1" and os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+# Trust the original HTTPS scheme only when explicitly enabled on a recognized ingress.
+render_https_proxy = os.environ.get("PENNY_TRUST_RENDER_PROXY") == "1" and os.environ.get(
+    "RENDER_EXTERNAL_HOSTNAME"
+)
+northflank_https_proxy = os.environ.get("PENNY_TRUST_NORTHFLANK_PROXY") == "1" and os.environ.get(
+    "NF_HOSTS"
+)
+if render_https_proxy or northflank_https_proxy:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 INSTALLED_APPS = [
     "django.contrib.auth",
