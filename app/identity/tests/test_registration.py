@@ -173,7 +173,7 @@ class RegistrationTests(TestCase):
         ):
             self.assertEqual(self.post("register", self.data).status_code, 202)
 
-    def test_smtp_failure_has_generic_response_and_counts_toward_limit(self) -> None:
+    def test_email_failure_has_generic_response_and_counts_toward_limit(self) -> None:
         with patch(
             "app.identity.services.registration.send_mail",
             side_effect=RuntimeError("private credentials"),

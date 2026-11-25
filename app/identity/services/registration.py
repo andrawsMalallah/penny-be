@@ -90,12 +90,12 @@ def send_registration_code(registration: Registration, code: str, generation: uu
         if send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [registration.email]) != 1:
             raise ServiceUnavailable()
     except Exception:
-        # SMTP exception text may contain private details.
+        # Provider exception text may contain private details.
         raise ServiceUnavailable() from None
     with transaction.atomic():
         challenge = lock_verification(registration.email)
         if challenge.generation != generation:
-            # Another request superseded this email while SMTP was in flight.
+            # Another request superseded this email while the provider call was in flight.
             return
         challenge.code_hash = make_password(code)
         challenge.expires_at = timezone.now() + CODE_LIFETIME
@@ -103,7 +103,7 @@ def send_registration_code(registration: Registration, code: str, generation: uu
 
 
 def start_registration(data: dict, remote_address: str) -> Registration:
-    # Commit counters separately: SMTP failure must not allow unlimited requests.
+    # Commit counters separately: email failure must not allow unlimited requests.
     enforce_request_limit(f"ip:{remote_address}", 20)
     enforce_request_limit(f"email:{data['email']}", 3)
     registration = Registration.objects.create(

@@ -3,10 +3,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.sessions.models import Session
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 
 class DeploymentEndpointTests(TestCase):
+    @override_settings(SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"))
+    def test_render_https_proxy_allows_secure_readiness(self) -> None:
+        response = self.client.get("/api/v1/ready/", HTTP_X_FORWARDED_PROTO="https")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("max-age=31536000", response["Strict-Transport-Security"])
+
     def test_readiness_checks_database_without_creating_finance_or_session_records(self) -> None:
         response = self.client.get("/api/v1/ready/")
         self.assertEqual(response.status_code, 200)

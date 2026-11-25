@@ -42,6 +42,9 @@ ALLOWED_HOSTS = os.environ.get("PENNY_ALLOWED_HOSTS", "localhost,127.0.0.1").spl
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get("PENNY_TRUSTED_ORIGINS", "").split(",") if origin
 ]
+# Only enable this behind Render's HTTPS ingress, which supplies the original scheme.
+if os.environ.get("PENNY_TRUST_RENDER_PROXY") == "1" and os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -116,11 +119,24 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024
 # No shared data cache; each app/page load reads the API and authoritative database.
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_TRANSPORT = os.environ.get("PENNY_EMAIL_TRANSPORT", "smtp")
+if EMAIL_TRANSPORT == "brevo_api":
+    EMAIL_BACKEND = "config.brevo_email.BrevoEmailBackend"
+elif EMAIL_TRANSPORT == "smtp":
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+else:
+    raise ImproperlyConfigured("PENNY_EMAIL_TRANSPORT must be smtp or brevo_api.")
 EMAIL_HOST = os.environ.get("PENNY_EMAIL_HOST", "smtp-relay.brevo.com")
-EMAIL_PORT = required_port("PENNY_EMAIL_PORT")
+EMAIL_PORT = required_port("PENNY_EMAIL_PORT") if EMAIL_TRANSPORT == "smtp" else 587
 EMAIL_USE_TLS = True
 EMAIL_TIMEOUT = 10
 EMAIL_HOST_USER = os.environ.get("PENNY_EMAIL_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("PENNY_EMAIL_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.environ.get("PENNY_EMAIL_FROM", "")
+PENNY_BREVO_API_KEY = (
+    required_setting("PENNY_BREVO_API_KEY") if EMAIL_TRANSPORT == "brevo_api" else ""
+)
+DEFAULT_FROM_EMAIL = (
+    required_setting("PENNY_EMAIL_FROM")
+    if EMAIL_TRANSPORT == "brevo_api"
+    else os.environ.get("PENNY_EMAIL_FROM", "")
+)

@@ -12,19 +12,24 @@ class Command(BaseCommand):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
         except Exception:
-            raise CommandError("PostgreSQL check failed; verify local configuration.") from None
+            raise CommandError("PostgreSQL check failed; verify configuration.") from None
         self.stdout.write("PostgreSQL: connected.")
-        if not all(
-            [settings.EMAIL_HOST_USER, settings.EMAIL_HOST_PASSWORD, settings.DEFAULT_FROM_EMAIL]
-        ):
-            raise CommandError("Fill in Brevo SMTP login/key and sender in backend/.env first.")
-        try:
-            with get_connection():
-                pass
-        except Exception:
-            raise CommandError(
-                "Brevo check failed; verify SMTP credentials/network access."
-            ) from None
-        self.stdout.write(
-            "Brevo: SMTP connected. No email sent; sender delivery remains unverified."
-        )
+        if settings.EMAIL_TRANSPORT == "brevo_api":
+            if not settings.PENNY_BREVO_API_KEY or not settings.DEFAULT_FROM_EMAIL:
+                raise CommandError("Configure the Brevo API key and verified sender.")
+            self.stdout.write("Brevo API: configured. Connectivity and delivery remain unverified.")
+        else:
+            if not all(
+                [
+                    settings.EMAIL_HOST_USER,
+                    settings.EMAIL_HOST_PASSWORD,
+                    settings.DEFAULT_FROM_EMAIL,
+                ]
+            ):
+                raise CommandError("Configure the Brevo SMTP login, key, and sender.")
+            try:
+                with get_connection():
+                    pass
+            except Exception:
+                raise CommandError("Brevo SMTP check failed; verify configuration.") from None
+            self.stdout.write("Brevo SMTP: connected. No email sent; delivery remains unverified.")

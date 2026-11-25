@@ -27,7 +27,7 @@ GENERIC_RESET_MESSAGE = (
 
 
 def request_password_reset(email: str, remote_address: str) -> str:
-    # Counters commit before SMTP; failures cannot grant extra sends.
+    # Counters commit before email delivery; failures cannot grant extra sends.
     enforce_request_limit(f"reset:ip:{remote_address}", 20)
     enforce_request_limit(f"reset:email:{email}", 3)
     generation = uuid.uuid4()
