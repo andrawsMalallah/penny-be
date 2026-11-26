@@ -105,6 +105,16 @@ class PasswordReset(models.Model):
     verified = models.BooleanField(default=False)
 
 
+class AccountDeletionChallenge(models.Model):
+    """One active email proof for deleting a signed-in user's account."""
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    generation = models.UUIDField(default=uuid.uuid4)
+    code_hash = models.CharField(max_length=128, blank=True)
+    expires_at = models.DateTimeField(null=True, db_index=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+
+
 class SignedInSession(models.Model):
     """Indexed metadata only; Django owns session keys, signing and expiration."""
 

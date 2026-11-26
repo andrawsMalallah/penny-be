@@ -129,7 +129,14 @@ class GroupArchiveView(ProtectedAPIView):
 
 class AccountListView(ProtectedAPIView):
     def get(self, request: Request) -> Response:
-        return paginated(services.accounts_for(request.user), AccountSerializer, request)
+        accounts = services.accounts_for(request.user)
+        group_id = request.query_params.get("group")
+        if group_id is not None:
+            if not group_id.isdecimal() or int(group_id) < 1:
+                raise ValidationError({"group": ["Choose a valid group."]})
+            group = get_object_or_404(AccountGroup, user=request.user, pk=int(group_id))
+            accounts = accounts.filter(group=group)
+        return paginated(accounts, AccountSerializer, request)
 
     def post(self, request: Request) -> Response:
         serializer = AccountCreateSerializer(data=request.data)

@@ -16,6 +16,7 @@ from rest_framework.exceptions import APIException, ValidationError
 from app.identity.errors import CodeRequestLimit as RequestLimitExceeded
 from app.identity.errors import InvalidCredentials, LoginAttemptLimit, ServiceUnavailable
 from app.identity.models import CodeRequestLimit, EmailVerification, Registration, User
+from app.identity.services.email_codes import consume_email_code
 
 GENERIC_REQUEST_MESSAGE = "If this address can be registered, a verification code has been sent."
 INVALID_CODE_MESSAGE = "This code is invalid or expired. Request a new code and try again."
@@ -166,8 +167,7 @@ def verify_registration(registration_id: str | None, code: str) -> User:
                 except IntegrityError:
                     user = None
                 # Code consumption, draft cleanup and user creation commit together.
-                challenge.code_hash = ""
-                challenge.save(update_fields=["code_hash"])
+                consume_email_code(challenge)
                 registration.password_hash = ""
                 registration.save(update_fields=["password_hash"])
     # Fail outside atomic so wrong-attempt increments remain committed.

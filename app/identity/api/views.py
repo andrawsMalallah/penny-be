@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.identity.api.serializers import (
+    AccountDeletionConfirmSerializer,
     CodeSerializer,
     CurrentUserSerializer,
     LoginSerializer,
@@ -25,6 +26,11 @@ from app.identity.api.serializers import (
 )
 from app.identity.models import SignedInSession, User
 from app.identity.permissions import IsVerifiedUser
+from app.identity.services.account_deletion import (
+    REQUEST_MESSAGE,
+    confirm_account_deletion,
+    request_account_deletion,
+)
 from app.identity.services.password_reset import (
     GENERIC_RESET_MESSAGE,
     complete_password_reset,
@@ -176,6 +182,21 @@ class SessionListView(ProtectedAPIView):
 class LogoutAllView(ProtectedAPIView):
     def post(self, request: Request) -> Response:
         revoke_user_sessions(request.user)
+        logout(request._request)
+        return Response(status=204)
+
+
+class AccountDeletionRequestView(ProtectedAPIView):
+    def post(self, request: Request) -> Response:
+        request_account_deletion(request.user, request.META.get("REMOTE_ADDR", "unknown"))
+        return Response({"detail": REQUEST_MESSAGE}, status=202)
+
+
+class AccountDeletionConfirmView(ProtectedAPIView):
+    def post(self, request: Request) -> Response:
+        serializer = AccountDeletionConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        confirm_account_deletion(request.user, serializer.validated_data["code"])
         logout(request._request)
         return Response(status=204)
 

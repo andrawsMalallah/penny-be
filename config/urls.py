@@ -83,6 +83,8 @@ urlpatterns = [
     path("api/v1/auth/logout/", views.LogoutView.as_view()),
     path("api/v1/auth/sessions/", views.SessionListView.as_view()),
     path("api/v1/auth/logout-all/", views.LogoutAllView.as_view()),
+    path("api/v1/auth/account-deletion/request/", views.AccountDeletionRequestView.as_view()),
+    path("api/v1/auth/account-deletion/confirm/", views.AccountDeletionConfirmView.as_view()),
     path("api/v1/auth/2fa/", factor.FactorStatusView.as_view()),
     path("api/v1/auth/2fa/login/", factor.FactorLoginView.as_view()),
     path("api/v1/auth/2fa/login/cancel/", factor.FactorLoginCancelView.as_view()),

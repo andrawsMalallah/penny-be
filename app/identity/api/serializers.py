@@ -39,6 +39,15 @@ class CodeSerializer(serializers.Serializer):
     code = serializers.RegexField(r"\A[0-9]{6}\Z", trim_whitespace=False, write_only=True)
 
 
+class AccountDeletionConfirmSerializer(CodeSerializer):
+    confirmation = serializers.BooleanField()
+
+    def validate_confirmation(self, value: bool) -> bool:
+        if not value:
+            raise serializers.ValidationError("Confirm permanent account deletion.")
+        return value
+
+
 class UserSettingsSerializer(serializers.Serializer):
     default_account = serializers.IntegerField(min_value=1, allow_null=True, required=False)
     language = serializers.ChoiceField(choices=["en", "ar"])

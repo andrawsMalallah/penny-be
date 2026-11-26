@@ -3,7 +3,13 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from app.identity.models import EmailVerification, PasswordReset, TwoFactorLogin, TwoFactorSettings
+from app.identity.models import (
+    AccountDeletionChallenge,
+    EmailVerification,
+    PasswordReset,
+    TwoFactorLogin,
+    TwoFactorSettings,
+)
 
 
 class Command(BaseCommand):
@@ -27,7 +33,7 @@ class Command(BaseCommand):
         cutoff = timezone.now()
         expired_sets = [
             model.objects.filter(expires_at__lte=cutoff).exclude(code_hash="")
-            for model in (EmailVerification, PasswordReset)
+            for model in (EmailVerification, PasswordReset, AccountDeletionChallenge)
         ]
         expired_setups = TwoFactorSettings.objects.filter(pending_expires_at__lte=cutoff).exclude(
             pending_ciphertext=""

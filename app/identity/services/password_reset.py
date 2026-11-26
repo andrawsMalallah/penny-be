@@ -13,6 +13,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from app.identity.models import PasswordReset, User
+from app.identity.services.email_codes import consume_email_code
 from app.identity.services.registration import (
     CODE_LIFETIME,
     INVALID_CODE_MESSAGE,
@@ -86,7 +87,7 @@ def verify_reset_code(generation: str | None, code: str) -> None:
         ):
             if check_password(code, challenge.code_hash):
                 challenge.verified = True
-                challenge.code_hash = ""
+                consume_email_code(challenge)
                 verified = True
             else:
                 challenge.failed_attempts += 1
