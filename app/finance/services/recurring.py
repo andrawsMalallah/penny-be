@@ -35,9 +35,22 @@ def today_in(zone: str) -> date:
 
 
 def schedules_for(user: User) -> QuerySet[RecurringSchedule]:
-    return RecurringSchedule.objects.filter(user=user).select_related(
+    return RecurringSchedule.objects.filter(user=user, deleted_at__isnull=True).select_related(
         "account__opening", "category"
     )
+
+
+@transaction.atomic
+def delete_stopped_schedule(user: User, pk: int, version: int) -> None:
+    User.objects.select_for_update().get(pk=user.pk)
+    schedule = get_object_or_404(schedules_for(user), pk=pk)
+    check_version(schedule, version)
+    if schedule.state != RecurringState.STOPPED:
+        raise ValidationError({"state": ["Stop this plan before deleting it."]})
+    # Retain windows and outcomes so posted entries and resolved dates remain auditable.
+    schedule.deleted_at = timezone.now()
+    schedule.version += 1
+    schedule.save(update_fields=["deleted_at", "version"])
 
 
 def dates_from(anchor: date, frequency: str, begins: date, ends: date) -> Iterator[date]:
@@ -98,9 +111,9 @@ def pending(schedule: RecurringSchedule, today: date, after: date | None = None)
         ).values_list("scheduled_date", flat=True)
     )
     available = [day for day in sampled[:100] if day not in settled]
-    result = available[:30]
-    more = len(available) > 30 or len(sampled) > 100 or len(sampled_windows) > 100
-    cursor = result[-1] if len(available) > 30 else (sampled[99] if len(sampled) > 100 else None)
+    result = available[:10]
+    more = len(available) > 10 or len(sampled) > 100 or len(sampled_windows) > 100
+    cursor = result[-1] if len(available) > 10 else (sampled[99] if len(sampled) > 100 else None)
     if more and cursor is None:
         # Empty historical timing windows still advance the bounded scan.
         cursor = min(today, sampled_windows[99].ends or today)

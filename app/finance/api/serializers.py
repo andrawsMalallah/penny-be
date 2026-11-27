@@ -219,6 +219,12 @@ class TransactionDeleteSerializer(StrictSerializer):
 class ActivityFilterSerializer(StrictSerializer):
     account = serializers.IntegerField(min_value=1, required=False)
     category = serializers.IntegerField(min_value=1, required=False)
+    account_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
+    category_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
     kind = serializers.ChoiceField(choices=TransactionKind.choices, required=False)
     currency = serializers.ChoiceField(choices=Currency.choices, required=False)
     start = serializers.DateField(input_formats=["%Y-%m-%d"], required=False)

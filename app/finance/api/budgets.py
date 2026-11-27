@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.pagination import PageNumberPagination
@@ -14,6 +15,10 @@ from app.identity.models import User
 class BudgetQuerySerializer(StrictSerializer):
     month = MonthField()
     page = serializers.IntegerField(min_value=1, required=False)
+    category = serializers.IntegerField(min_value=1, required=False)
+    category_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
 
 
 class BudgetInputSerializer(StrictSerializer):
@@ -30,6 +35,11 @@ class BudgetInputSerializer(StrictSerializer):
         return attrs
 
 
+class BudgetDeleteSerializer(StrictSerializer):
+    month = MonthField()
+    version = serializers.IntegerField(min_value=0)
+
+
 class BudgetListView(ProtectedAPIView):
     @transaction.atomic
     def get(self, request: Request) -> Response:
@@ -38,9 +48,15 @@ class BudgetListView(ProtectedAPIView):
         month = serializer.validated_data["month"]
         User.objects.select_for_update().get(pk=request.user.pk)
         paginator = PageNumberPagination()
-        categories = paginator.paginate_queryset(
-            budgets.active_categories(request.user, month), request
-        )
+        active_categories = budgets.active_categories(request.user, month)
+        category_search = serializer.validated_data.get("category_search", "")
+        if category_search:
+            active_categories = active_categories.filter(
+                Q(name_en__icontains=category_search) | Q(name_ar__icontains=category_search)
+            )
+        if "category" in serializer.validated_data:
+            active_categories = active_categories.filter(pk=serializer.validated_data["category"])
+        categories = paginator.paginate_queryset(active_categories, request)
         return paginator.get_paginated_response(
             budgets.budget_rows(categories, request.user, month)
         )
@@ -60,3 +76,11 @@ class BudgetDetailView(ProtectedAPIView):
         serializer = BudgetInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return Response(budgets.save_budget(request.user, pk, serializer.validated_data))
+
+
+class BudgetDeleteView(ProtectedAPIView):
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = BudgetDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        budgets.delete_budget(request.user, pk, **serializer.validated_data)
+        return Response(status=204)

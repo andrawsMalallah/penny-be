@@ -164,8 +164,8 @@ class AnalyticsTests(TestCase):
         self.assertEqual(self.get().json()["current"]["IQD"]["held"], "1038.75")
         listing = self.get("accounts/").json()
         self.assertEqual(listing["count"], 32)
-        self.assertEqual(len(listing["results"]), 30)
-        self.assertEqual(len(self.get("accounts/", page="2").json()["results"]), 2)
+        self.assertEqual(len(listing["results"]), 10)
+        self.assertEqual(len(self.get("accounts/", page="4").json()["results"]), 2)
         groups = self.get("groups/").json()["results"]
         self.assertEqual(next(row for row in groups if row["group"] is None)["USD"], "77.50")
 
@@ -286,7 +286,7 @@ class AnalyticsTests(TestCase):
             )
         report = self.get(period="custom", start="2026-01-01", end="2026-01-31").json()
         accounts = report["breakdowns"]["accounts"]
-        self.assertEqual(len(accounts["results"]), 30)
+        self.assertEqual(len(accounts["results"]), 10)
         next_page = urlsplit(accounts["next"])
         self.assertEqual(next_page.path, "/api/v1/analytics/accounts/")
         self.assertEqual(
@@ -301,7 +301,8 @@ class AnalyticsTests(TestCase):
         )
         response = self.client.get(f"{next_page.path}?{next_page.query}")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()["results"]), 2)
+        self.assertEqual(len(response.json()["results"]), 10)
+        self.assertEqual(len(self.get("accounts/", page="4").json()["results"]), 2)
 
     def test_timezone_and_calendar_boundaries_include_leap_years(self) -> None:
         with patch(

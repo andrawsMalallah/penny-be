@@ -63,6 +63,40 @@ class RecurringTests(TestCase):
         self.assertEqual(response.status_code, 201, response.json())
         return response.json()
 
+    def test_list_filters_plan_account_category_kind_and_currency(self) -> None:
+        plan = self.create()
+        self.create(name="Salary", kind="income", category=None, currency="USD")
+        filters = {
+            "state": "active",
+            "search": "ren",
+            "account_search": "wal",
+            "category_search": "rent",
+            "kind": "expense",
+            "currency": "IQD",
+        }
+        response = self.client.get("/api/v1/recurring/", filters)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["id"] for row in response.json()["results"]], [plan["id"]])
+        for key in ("search", "account_search", "category_search", "kind", "currency"):
+            self.assertEqual(
+                self.client.get("/api/v1/recurring/", {**filters, key: "missing"}).json()["count"]
+                if key in ("search", "account_search", "category_search")
+                else self.client.get("/api/v1/recurring/", {**filters, key: "invalid"}).status_code,
+                0 if key in ("search", "account_search", "category_search") else 400,
+            )
+
+    def test_list_filters_exact_owned_account_and_category_ids(self) -> None:
+        plan = self.create()
+        foreign_category = ExpenseCategory.objects.create(user=self.other, name_en="Other")
+        url = "/api/v1/recurring/"
+        response = self.client.get(url, {"account": self.account.pk, "category": self.category.pk})
+        self.assertEqual(
+            [row["id"] for row in response.json()["results"]],
+            [plan["id"]],
+        )
+        self.assertEqual(self.client.get(url, {"category": foreign_category.pk}).json()["count"], 0)
+        self.assertEqual(self.client.get(url, {"account": 0}).status_code, 400)
+
     def pending(self, schedule: dict, after: str = "") -> dict:
         response = self.client.get(
             f"/api/v1/recurring/{schedule['id']}/pending/",
@@ -79,6 +113,28 @@ class RecurringTests(TestCase):
     def state(self, schedule: dict, state: str):
         return self.post(
             f"{schedule['id']}/state/", version=schedule["version"], state=state, timezone="UTC"
+        )
+
+    def test_delete_stopped_plan_hides_it_and_keeps_outcomes(self) -> None:
+        plan = self.create()
+        self.assertEqual(
+            self.post(f"{plan['id']}/delete/", version=plan["version"]).status_code, 400
+        )
+        outcome = RecurringOutcome.objects.create(
+            schedule_id=plan["id"], scheduled_date=date(2026, 1, 31), skipped=True
+        )
+        stopped = self.state(plan, "stopped").json()
+        self.assertEqual(
+            self.post(f"{plan['id']}/delete/", version=plan["version"]).status_code, 409
+        )
+        self.assertEqual(
+            self.post(f"{plan['id']}/delete/", version=stopped["version"]).status_code, 204
+        )
+        self.assertEqual(self.client.get("/api/v1/recurring/?state=all").json()["count"], 0)
+        self.assertEqual(self.client.get(f"/api/v1/recurring/{plan['id']}/").status_code, 404)
+        self.assertTrue(RecurringOutcome.objects.filter(pk=outcome.pk).exists())
+        self.assertTrue(
+            RecurringSchedule.objects.filter(pk=plan["id"], deleted_at__isnull=False).exists()
         )
 
     def resolve(self, schedule: dict, day: str, skip: bool = False, **changes: object):
@@ -279,7 +335,7 @@ class RecurringTests(TestCase):
         model = RecurringSchedule.objects.get(pk=schedule["id"])
         with self.assertNumQueries(2):
             first = recurring.pending(model, date(2026, 1, 1))
-        self.assertEqual(len(first["results"]), 30)
+        self.assertEqual(len(first["results"]), 10)
         second = recurring.pending(
             model, date(2026, 1, 1), date.fromisoformat(first["next_cursor"])
         )
@@ -300,7 +356,7 @@ class RecurringTests(TestCase):
             self.create(name=f"Schedule {index}")
         response = self.client.get("/api/v1/recurring/").json()
         self.assertEqual(response["count"], 31)
-        self.assertEqual(len(response["results"]), 30)
+        self.assertEqual(len(response["results"]), 10)
         self.assertNotIn("creation_payload", response["results"][0])
         self.assertNotIn("request_id", response["results"][0])
 

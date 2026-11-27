@@ -201,6 +201,15 @@ class TransactionTests(TestCase):
     def test_archived_references_remain_readable_and_correctable_but_not_assignable(self) -> None:
         entry = self.expense(amount="5.00").json()
         archive_account(self.user, self.account.pk, True)
+        token = self.client.get("/api/v1/auth/csrf/").json()["csrf_token"]
+        delete_account_path = f"/api/v1/accounts/{self.account.pk}/delete/"
+        self.assertEqual(
+            self.client.post(
+                delete_account_path, {}, format="json", HTTP_X_CSRFTOKEN=token
+            ).status_code,
+            400,
+        )
+
         self.category.archived = True
         self.category.save(update_fields=["archived"])
         self.assertEqual(self.create().status_code, 400)
@@ -211,6 +220,28 @@ class TransactionTests(TestCase):
         self.assertTrue(changed.json()["account_archived"])
         self.assertEqual(self.post(f"{entry['id']}/delete/", {"version": 1}).status_code, 409)
         self.assertEqual(self.post(f"{entry['id']}/delete/", {"version": 2}).status_code, 204)
+        self.assertEqual(
+            self.client.post(
+                delete_account_path, {}, format="json", HTTP_X_CSRFTOKEN=token
+            ).status_code,
+            400,
+        )
+
+    def test_name_search_filters_activity_without_matching_other_users(self) -> None:
+        self.expense(amount="5.00")
+        self.assertEqual(self.client.get(self.root, {"account_search": "wall"}).json()["count"], 1)
+        self.assertEqual(
+            self.client.get(self.root, {"category_search": self.category.name_en[:3]}).json()[
+                "count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            self.client.get(self.root, {"account_search": "foreign"}).json()["count"], 0
+        )
+        self.assertEqual(
+            self.client.get(self.root, {"category_search": "x" * 101}).status_code, 400
+        )
 
     def test_foreign_accounts_categories_and_transaction_boundaries(self) -> None:
         foreign = save_account(
@@ -270,8 +301,9 @@ class TransactionTests(TestCase):
         for index in range(32):
             self.assertEqual(self.create(note=f"Income {index}").status_code, 201)
         self.expense(currency="USD", amount="1.00", date="2026-01-03")
-        self.assertEqual(len(self.client.get(self.root).json()["results"]), 30)
-        self.assertEqual(len(self.client.get(self.root + "?page=2").json()["results"]), 3)
+        self.assertEqual(len(self.client.get(self.root).json()["results"]), 10)
+        self.assertEqual(len(self.client.get(self.root + "?page=2").json()["results"]), 10)
+        self.assertEqual(len(self.client.get(self.root + "?page=4").json()["results"]), 3)
         filtered = self.client.get(
             self.root
             + f"?account={self.account.pk}&kind=expense&currency=USD"

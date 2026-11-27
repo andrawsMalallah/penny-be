@@ -167,10 +167,11 @@ class SessionTests(TestCase):
         first = self.client.get("/api/v1/auth/sessions/").json()
         second = self.client.get("/api/v1/auth/sessions/?page=2").json()
         self.assertEqual(
-            (first["count"], len(first["results"]), len(second["results"])), (33, 30, 3)
+            (first["count"], len(first["results"]), len(second["results"])), (33, 10, 10)
         )
         self.assertIsNotNone(first["next"])
         self.assertIsNotNone(second["previous"])
+        self.assertEqual(len(self.client.get("/api/v1/auth/sessions/?page=4").json()["results"]), 3)
 
     def test_login_rechecks_a_password_reset_that_completed_during_authentication(self) -> None:
         from django.contrib.sessions.backends.db import SessionStore

@@ -27,6 +27,16 @@ def transactions_for(user: User, filters: dict | None = None) -> QuerySet[MoneyT
     values = filters or {}
     if "account" in values:
         queryset = queryset.filter(Q(account=values["account"]) | Q(destination=values["account"]))
+    if values.get("account_search"):
+        search = values["account_search"]
+        queryset = queryset.filter(
+            Q(account__name__icontains=search) | Q(destination__name__icontains=search)
+        )
+    if values.get("category_search"):
+        search = values["category_search"]
+        queryset = queryset.filter(
+            Q(category__name_en__icontains=search) | Q(category__name_ar__icontains=search)
+        )
     if "currency" in values:
         queryset = queryset.filter(Q(currency=values["currency"]) | Q(kind="exchange"))
     for field in ("category", "kind"):

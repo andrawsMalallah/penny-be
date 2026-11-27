@@ -77,7 +77,7 @@ def monthly_review(user: User, period: dict, page: int = 1) -> dict:
         ]
         for currency in CURRENCIES
     }
-    paginator = Paginator(active_categories(user, period["start"]), 30)
+    paginator = Paginator(active_categories(user, period["start"]), 10)
     try:
         budget_page = paginator.page(page)
     except EmptyPage:

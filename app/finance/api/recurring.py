@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.pagination import PageNumberPagination
@@ -59,9 +60,27 @@ class ScheduleStateSerializer(ZoneSerializer):
     state = serializers.ChoiceField(choices=RecurringState.choices)
 
 
+class ScheduleDeleteSerializer(StrictSerializer):
+    version = serializers.IntegerField(min_value=1)
+
+
 class ScheduleQuerySerializer(StrictSerializer):
     page = serializers.IntegerField(min_value=1, required=False)
     state = serializers.ChoiceField(choices=[*RecurringState.values, "all"], default="all")
+    account = serializers.IntegerField(min_value=1, required=False)
+    category = serializers.IntegerField(min_value=1, required=False)
+    search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
+    account_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
+    category_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
+    kind = serializers.ChoiceField(choices=["income", "expense"], required=False)
+    currency = serializers.ChoiceField(choices=Currency.choices, required=False)
+    frequency = serializers.ChoiceField(choices=RecurringFrequency.choices, required=False)
 
 
 class PendingQuerySerializer(ZoneSerializer):
@@ -118,6 +137,22 @@ class ScheduleListView(ProtectedAPIView):
         queryset = recurring.schedules_for(request.user)
         if serializer.validated_data["state"] != "all":
             queryset = queryset.filter(state=serializer.validated_data["state"])
+        filters = serializer.validated_data
+        if filters.get("search"):
+            queryset = queryset.filter(name__icontains=filters["search"])
+        if filters.get("account_search"):
+            queryset = queryset.filter(account__name__icontains=filters["account_search"])
+        if filters.get("category_search"):
+            queryset = queryset.filter(
+                Q(category__name_en__icontains=filters["category_search"])
+                | Q(category__name_ar__icontains=filters["category_search"])
+            )
+        for field in ("account", "category"):
+            if field in filters:
+                queryset = queryset.filter(**{field: filters[field]})
+        for field in ("kind", "currency", "frequency"):
+            if field in filters:
+                queryset = queryset.filter(**{field: filters[field]})
         paginator = PageNumberPagination()
         rows = paginator.paginate_queryset(queryset, request)
         return paginator.get_paginated_response(ScheduleSerializer(rows, many=True).data)
@@ -140,6 +175,14 @@ class ScheduleDetailView(ProtectedAPIView):
         serializer.is_valid(raise_exception=True)
         schedule, _ = recurring.save_schedule(request.user, serializer.validated_data, pk)
         return Response(ScheduleSerializer(schedule).data)
+
+
+class ScheduleDeleteView(ProtectedAPIView):
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = ScheduleDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        recurring.delete_stopped_schedule(request.user, pk, serializer.validated_data["version"])
+        return Response(status=204)
 
 
 class ScheduleStateView(ProtectedAPIView):

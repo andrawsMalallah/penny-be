@@ -42,6 +42,13 @@ class CategoryTests(TestCase):
         )
         self.assertEqual(self.client.get(self.root).json()["count"], 8)
 
+    def test_search_matches_either_language_and_stays_private(self) -> None:
+        ExpenseCategory.objects.create(user=self.user, name_en="Groceries", name_ar="بقالة")
+        ExpenseCategory.objects.create(user=self.other, name_en="Private groceries")
+        response = self.client.get(self.root, {"search": "بقالة"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["name_en"] for row in response.json()["results"]], ["Groceries"])
+
     def test_renamed_archived_starters_never_reappear(self) -> None:
         initialize_categories(self.user)
         category = ExpenseCategory.objects.first()
@@ -168,8 +175,9 @@ class CategoryTests(TestCase):
         first = self.client.get(self.root).json()
         second = self.client.get(self.root + "?page=2").json()
         self.assertEqual(first["count"], 41)
-        self.assertEqual(len(first["results"]), 30)
-        self.assertEqual(len(second["results"]), 11)
+        self.assertEqual(len(first["results"]), 10)
+        self.assertEqual(len(second["results"]), 10)
+        self.assertEqual(len(self.client.get(self.root + "?page=5").json()["results"]), 1)
         self.assertTrue(first["next"])
         self.assertTrue(second["previous"])
         self.assertEqual(self.client.get(self.root + "?archived=bad").status_code, 400)

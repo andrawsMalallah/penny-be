@@ -189,16 +189,16 @@ class MonthlyReviewTests(TestCase):
             self.budget(category, "2026-10")
         first = self.get().json()
         self.assertEqual(first["budgets"]["count"], 31)
-        self.assertEqual(len(first["budgets"]["results"]), 30)
+        self.assertEqual(len(first["budgets"]["results"]), 10)
         parsed = urlsplit(first["budgets"]["next"])
         self.assertEqual(parse_qs(parsed.query)["timezone"], ["Asia/Baghdad"])
         second = self.client.get(first["budgets"]["next"]).json()
-        self.assertEqual(len(second["budgets"]["results"]), 1)
+        self.assertEqual(len(second["budgets"]["results"]), 10)
         self.assertEqual(second["activity"], first["activity"])
         with CaptureQueriesContext(connection) as captured:
             monthly_review(self.user, monthly_period(date(2026, 11, 1), "Asia/Baghdad"))
         self.assertLessEqual(len(captured), 12)
-        self.assertEqual(self.get(page=3).status_code, 404)
+        self.assertEqual(self.get(page=5).status_code, 404)
         category = ExpenseCategory.objects.get(pk=first["budgets"]["results"][0]["category"])
         save_budget(
             self.user,

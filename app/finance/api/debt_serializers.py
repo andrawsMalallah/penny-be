@@ -68,6 +68,9 @@ class RepaymentUpdateSerializer(RepaymentInputSerializer):
 class DebtFilterSerializer(StrictSerializer):
     page = serializers.IntegerField(min_value=1, required=False)
     person = serializers.IntegerField(min_value=1, required=False)
+    person_search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
     direction = serializers.ChoiceField(choices=DebtDirection.choices, required=False)
     currency = serializers.ChoiceField(choices=Currency.choices, required=False)
     status = serializers.ChoiceField(choices=["open", "settled", "all"], default="open")
@@ -76,6 +79,9 @@ class DebtFilterSerializer(StrictSerializer):
 class DebtPersonFilterSerializer(StrictSerializer):
     page = serializers.IntegerField(min_value=1, required=False)
     archived = serializers.ChoiceField(choices=["false", "all"], required=False)
+    search = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, trim_whitespace=True
+    )
 
 
 class DebtPersonSerializer(serializers.ModelSerializer):

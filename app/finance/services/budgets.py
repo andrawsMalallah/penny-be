@@ -127,3 +127,24 @@ def save_budget(user: User, category_id: int, values: dict) -> dict:
     schedule.save(update_fields=["version"])
     category = categories_for_month(user, month).get(pk=category.pk)
     return budget_rows([category], user, month)[0]
+
+
+@transaction.atomic
+def delete_budget(user: User, category_id: int, month: date, version: int) -> None:
+    User.objects.select_for_update().get(pk=user.pk)
+    category = get_object_or_404(ExpenseCategory, user=user, pk=category_id)
+    schedule = get_object_or_404(BudgetSchedule, category=category)
+    if schedule.version != version:
+        raise BudgetConflict()
+    current = categories_for_month(user, month).get(pk=category.pk)
+    rule = BudgetRule.objects.filter(pk=current.override_rule or current.recurring_rule).first()
+    if rule is None or (rule.limit_iqd is None and rule.limit_usd is None):
+        raise ValidationError({"month": ["There is no budget to delete for this month."]})
+    # A null rule masks older recurring limits without changing earlier months.
+    schedule.rules.update_or_create(
+        month=month,
+        recurring=rule.recurring,
+        defaults={"limit_iqd": None, "limit_usd": None},
+    )
+    schedule.version += 1
+    schedule.save(update_fields=["version"])

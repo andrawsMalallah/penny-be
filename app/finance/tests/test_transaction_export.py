@@ -26,6 +26,7 @@ from app.finance.services.transaction_export import (
 class TransactionExportTests(TransactionTestCase):
     create = ledger_tests.TransactionTests.create
     post = ledger_tests.TransactionTests.post
+    expense = ledger_tests.TransactionTests.expense
 
     def setUp(self) -> None:
         ledger_tests.TransactionTests.setUp(self)
@@ -52,7 +53,7 @@ class TransactionExportTests(TransactionTestCase):
     def test_all_pages_order_exact_dates_text_and_no_mutations(self) -> None:
         for index in range(33):
             self.assertEqual(self.create(note=f"Entry {index}").status_code, 201)
-        self.assertEqual(len(self.client.get(self.root).json()["results"]), 30)
+        self.assertEqual(len(self.client.get(self.root).json()["results"]), 10)
         snapshot = list(MoneyTransaction.objects.values())
         rows = self.document()
         self.assertEqual(len(rows), 34)
@@ -60,6 +61,14 @@ class TransactionExportTests(TransactionTestCase):
         self.assertEqual(rows[1][-1], "Entry 32")
         self.assertEqual(rows[-1][-1], "Entry 0")
         self.assertEqual(list(MoneyTransaction.objects.values()), snapshot)
+
+    def test_name_search_matches_export_count_and_rows(self) -> None:
+        self.expense(amount="5.00")
+        self.create(note="Unrelated income")
+        filters = {"account_search": "wall", "category_search": self.category.name_en[:3]}
+        self.assertEqual(self.client.get(self.root, filters).json()["count"], 1)
+        rows = self.document(**filters)
+        self.assertEqual(len(rows), 2)
 
     def test_shared_filters_include_transfer_destination_and_both_exchange_currencies(self) -> None:
         destination = save_account(

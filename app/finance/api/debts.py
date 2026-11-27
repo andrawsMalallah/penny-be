@@ -36,9 +36,11 @@ class DebtPersonListView(ProtectedAPIView):
     def get(self, request: Request) -> Response:
         filters = DebtPersonFilterSerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
-        return paginated(
-            DebtPerson.objects.filter(user=request.user), DebtPersonSerializer, request
-        )
+        queryset = DebtPerson.objects.filter(user=request.user)
+        search = filters.validated_data.get("search")
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        return paginated(queryset, DebtPersonSerializer, request)
 
 
 class DebtPersonDetailView(ProtectedAPIView):
@@ -57,6 +59,8 @@ class DebtListView(ProtectedAPIView):
         for field in ("person", "direction", "currency"):
             if field in values:
                 queryset = queryset.filter(**{field: values[field]})
+        if values.get("person_search"):
+            queryset = queryset.filter(person__name__icontains=values["person_search"])
         if values["status"] == "open":
             queryset = queryset.filter(remaining__gt=0)
         elif values["status"] == "settled":

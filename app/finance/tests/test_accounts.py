@@ -58,6 +58,48 @@ class AccountsTests(TestCase):
         self.assertFalse(Account.objects.exists())
         self.assertFalse(AccountGroup.objects.exists())
 
+    def test_archived_account_delete_requires_no_references(self) -> None:
+        account = self.create().json()
+        path = f"accounts/{account['id']}/delete/"
+        self.assertEqual(self.post(path, {}).status_code, 400)
+        self.assertEqual(
+            self.post(f"accounts/{account['id']}/archive/", {"archived": True}).status_code, 200
+        )
+        self.client.force_login(self.other)
+        self.assertEqual(self.post(path, {}).status_code, 404)
+        self.client.force_login(self.user)
+        self.assertEqual(self.post(path, {}).status_code, 204)
+        self.assertFalse(Account.objects.filter(pk=account["id"]).exists())
+        self.assertFalse(OpeningBalance.objects.exists())
+        self.assertEqual(self.post(path, {}).status_code, 404)
+
+    def test_group_search_is_owned_and_bounded(self) -> None:
+        AccountGroup.objects.create(user=self.user, name="Household")
+        AccountGroup.objects.create(user=self.user, name="Travel")
+        AccountGroup.objects.create(user=self.other, name="Household private")
+        response = self.client.get("/api/v1/account-groups/?search=house")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["name"] for row in response.json()["results"]], ["Household"])
+
+    def test_ungrouped_filter_is_paginated_and_owner_scoped(self) -> None:
+        group = AccountGroup.objects.create(user=self.user, name="Household")
+        ungrouped = self.create(name="Personal").json()
+        self.create(name="Shared", group=group.pk)
+        save_account(
+            self.other,
+            {
+                "name": "Private",
+                "group": None,
+                "opening_iqd": Decimal("0"),
+                "opening_usd": Decimal("0"),
+            },
+        )
+        response = self.client.get("/api/v1/accounts/?group=none")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual([row["id"] for row in response.json()["results"]], [ungrouped["id"]])
+        self.assertEqual(self.client.get("/api/v1/accounts/?group=unknown").status_code, 400)
+
     def test_invalid_money_is_rejected_without_any_account(self) -> None:
         for amount in [
             "-0.01",
@@ -232,10 +274,15 @@ class AccountsTests(TestCase):
             response = self.client.get("/api/v1/accounts/")
         data = response.json()
         self.assertEqual(data["count"], 32)
-        self.assertEqual(len(data["results"]), 30)
+        self.assertEqual(len(data["results"]), 10)
         self.assertTrue(data["next"])
         self.assertLess(len(captured), 15)
-        self.assertEqual(len(self.client.get("/api/v1/accounts/?page=2").json()["results"]), 2)
+        self.assertEqual(len(self.client.get("/api/v1/accounts/?page=2").json()["results"]), 10)
+        self.assertEqual(len(self.client.get("/api/v1/accounts/?page=4").json()["results"]), 2)
+        self.assertEqual(
+            self.client.get("/api/v1/accounts/?search=Account%201").json()["count"], 10
+        )
+        self.assertEqual(self.client.get("/api/v1/accounts/?search=" + "a" * 101).status_code, 400)
         self.assertEqual(self.client.get("/api/v1/accounts/?archived=invalid").status_code, 400)
 
     def test_database_rejects_negative_opening_money(self) -> None:

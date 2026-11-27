@@ -100,6 +100,17 @@ class DebtTests(TestCase):
         self.assertEqual(MoneyTransaction.objects.count(), 0)
         self.assertEqual(DebtPerson.objects.count(), 1)
 
+    def test_person_name_search_filters_debts(self) -> None:
+        self.debt(person_name="Mona")
+        self.debt(person_name="Nadia")
+        self.assertEqual(
+            self.client.get(self.root, {"person_search": "mon", "status": "all"}).json()["count"], 1
+        )
+        self.assertEqual(
+            self.client.get(self.root, {"person_search": "missing"}).json()["count"], 0
+        )
+        self.assertEqual(self.client.get(self.root, {"person_search": "x" * 101}).status_code, 400)
+
     def test_new_lending_borrowing_and_activity_exclusions(self) -> None:
         lent = self.debt(origin="movement", account=self.account.pk, amount="60", date="2026-01-02")
         self.assertEqual(lent.status_code, 201)
@@ -429,16 +440,21 @@ class DebtTests(TestCase):
     def test_paginated_people_debts_payments_filters_and_query_bounds(self) -> None:
         for index in range(31):
             self.debt(person_name=f"Person {index}")
-        self.assertEqual(len(self.client.get(self.root).json()["results"]), 30)
-        self.assertEqual(len(self.client.get(self.root, {"page": 2}).json()["results"]), 1)
+        self.assertEqual(len(self.client.get(self.root).json()["results"]), 10)
+        self.assertEqual(len(self.client.get(self.root, {"page": 4}).json()["results"]), 1)
         people = self.client.get("/api/v1/debt-people/").json()
-        self.assertEqual(len(people["results"]), 30)
+        self.assertEqual(len(people["results"]), 10)
+        searched = self.client.get("/api/v1/debt-people/", {"search": "Person 2"}).json()
+        self.assertEqual(searched["count"], 11)
+        self.assertEqual(
+            self.client.get("/api/v1/debt-people/", {"search": "x" * 101}).status_code, 400
+        )
         self.assertNotIn("user", people["results"][0])
         debt = self.debt(amount="100").json()
         for _ in range(31):
             self.pay(debt, amount="1")
         self.assertEqual(
-            len(self.client.get(f"{self.root}{debt['id']}/repayments/").json()["results"]), 30
+            len(self.client.get(f"{self.root}{debt['id']}/repayments/").json()["results"]), 10
         )
         with self.assertNumQueries(1):
             self.assertEqual(len(DebtSerializer(debts_for(self.user)[:30], many=True).data), 30)

@@ -1,4 +1,4 @@
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -30,9 +30,17 @@ def paginated(
     archived = request.query_params.get("archived", "false")
     if archived not in ["true", "false", "all"]:
         raise ValidationError({"archived": ["Choose true, false or all."]})
+    search = request.query_params.get("search", "").strip()
+    if len(search) > 100:
+        raise ValidationError({"search": ["Use at most 100 characters."]})
     paginator = PageNumberPagination()
     if archived != "all":
         queryset = queryset.filter(archived=archived == "true")
+    if search:
+        if serializer_class is CategorySerializer:
+            queryset = queryset.filter(Q(name_en__icontains=search) | Q(name_ar__icontains=search))
+        else:
+            queryset = queryset.filter(name__icontains=search)
     page = paginator.paginate_queryset(queryset, request)
     return paginator.get_paginated_response(serializer_class(page, many=True).data)
 
@@ -132,10 +140,13 @@ class AccountListView(ProtectedAPIView):
         accounts = services.accounts_for(request.user)
         group_id = request.query_params.get("group")
         if group_id is not None:
-            if not group_id.isdecimal() or int(group_id) < 1:
+            if group_id == "none":
+                accounts = accounts.filter(group__isnull=True)
+            elif not group_id.isdecimal() or int(group_id) < 1:
                 raise ValidationError({"group": ["Choose a valid group."]})
-            group = get_object_or_404(AccountGroup, user=request.user, pk=int(group_id))
-            accounts = accounts.filter(group=group)
+            else:
+                group = get_object_or_404(AccountGroup, user=request.user, pk=int(group_id))
+                accounts = accounts.filter(group=group)
         return paginated(accounts, AccountSerializer, request)
 
     def post(self, request: Request) -> Response:
@@ -172,3 +183,11 @@ class AccountArchiveView(ProtectedAPIView):
                 services.archive_account(request.user, pk, serializer.validated_data["archived"])
             ).data
         )
+
+
+class AccountDeleteView(ProtectedAPIView):
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = StrictSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.delete_archived_account(request.user, pk)
+        return Response(status=204)

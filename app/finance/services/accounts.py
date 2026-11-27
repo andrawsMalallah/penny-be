@@ -18,7 +18,14 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
-from app.finance.models import Account, AccountGroup, MoneyTransaction, OpeningBalance
+from app.finance.models import (
+    Account,
+    AccountGroup,
+    Debt,
+    MoneyTransaction,
+    OpeningBalance,
+    RecurringSchedule,
+)
 from app.finance.services.ledger import opening_date
 from app.identity.models import User, UserSettings
 
@@ -143,6 +150,29 @@ def archive_account(user: User, account_id: int, archived: bool) -> Account:
     if archived:
         UserSettings.objects.filter(user=user, default_account=account).update(default_account=None)
     return account
+
+
+@transaction.atomic
+def delete_archived_account(user: User, account_id: int) -> None:
+    User.objects.select_for_update().get(pk=user.pk)
+    account = get_object_or_404(Account, user=user, pk=account_id)
+    if not account.archived:
+        raise ValidationError({"account": ["Archive this account before deleting it."]})
+    if (
+        MoneyTransaction.objects.filter(Q(account=account) | Q(destination=account)).exists()
+        or Debt.objects.filter(account=account).exists()
+        or RecurringSchedule.objects.filter(account=account).exists()
+    ):
+        raise ValidationError(
+            {
+                "account": [
+                    "This account has financial history or a recurring plan and cannot be deleted."
+                ]
+            }
+        )
+    UserSettings.objects.filter(user=user, default_account=account).update(default_account=None)
+    OpeningBalance.objects.filter(account=account).delete()
+    account.delete()
 
 
 @transaction.atomic

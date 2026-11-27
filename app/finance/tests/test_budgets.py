@@ -50,6 +50,41 @@ class BudgetTests(TestCase):
     def listing(self, month: str = "2026-01"):
         return self.client.get(f"/api/v1/budgets/?month={month}")
 
+    def test_category_text_filter_applies_before_pagination(self) -> None:
+        self.assertEqual(self.post().status_code, 200)
+        response = self.client.get(
+            "/api/v1/budgets/", {"month": "2026-01", "category_search": "FOO"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual(response.json()["results"][0]["category"], self.category.pk)
+        self.assertEqual(
+            self.client.get(
+                "/api/v1/budgets/", {"month": "2026-01", "category_search": "rent"}
+            ).json()["count"],
+            0,
+        )
+        self.assertEqual(
+            self.client.get(
+                "/api/v1/budgets/", {"month": "2026-01", "category_search": "x" * 101}
+            ).status_code,
+            400,
+        )
+
+    def test_category_id_filter_is_exact_and_owner_scoped(self) -> None:
+        self.assertEqual(self.post().status_code, 200)
+        foreign_category = ExpenseCategory.objects.create(user=self.other, name_en="Food")
+        url = "/api/v1/budgets/"
+        response = self.client.get(url, {"month": "2026-01", "category": self.category.pk})
+        self.assertEqual(
+            [row["category"] for row in response.json()["results"]],
+            [self.category.pk],
+        )
+        response = self.client.get(url, {"month": "2026-01", "category": foreign_category.pk})
+        self.assertEqual(response.json()["count"], 0)
+        response = self.client.get(url, {"month": "2026-01", "category": 0})
+        self.assertEqual(response.status_code, 400)
+
     def test_reads_do_not_initialize_and_no_budget_before_start(self) -> None:
         self.assertEqual(self.detail()["version"], 0)
         self.assertEqual(self.listing().json()["count"], 0)
@@ -86,6 +121,41 @@ class BudgetTests(TestCase):
         self.assertEqual(self.detail("2027-01")["version"], 3)
         self.assertEqual(self.detail("2026-01")["IQD"]["limit"], "100.00")
         self.assertEqual(self.post(version=0).status_code, 409)
+
+    def test_delete_continuing_budget_preserves_past_and_stops_future(self) -> None:
+        self.assertEqual(self.post().status_code, 200)
+        token = self.client.get("/api/v1/auth/csrf/").json()["csrf_token"]
+        path = f"/api/v1/budgets/{self.category.pk}/delete/"
+        self.assertEqual(
+            self.client.post(
+                path, {"month": "2026-03", "version": 0}, format="json", HTTP_X_CSRFTOKEN=token
+            ).status_code,
+            409,
+        )
+        self.assertEqual(
+            self.client.post(
+                path, {"month": "2026-03", "version": 1}, format="json", HTTP_X_CSRFTOKEN=token
+            ).status_code,
+            204,
+        )
+        self.assertEqual(self.detail("2026-02")["IQD"]["limit"], "100.00")
+        self.assertIsNone(self.detail("2026-03")["IQD"]["limit"])
+        self.assertIsNone(self.detail("2027-01")["IQD"]["limit"])
+        self.assertEqual(self.listing("2026-03").json()["count"], 0)
+
+    def test_delete_continuing_budget_keeps_later_independent_plan(self) -> None:
+        self.post()
+        self.post(month="2026-06", version=1, limit_iqd="300")
+        token = self.client.get("/api/v1/auth/csrf/").json()["csrf_token"]
+        response = self.client.post(
+            f"/api/v1/budgets/{self.category.pk}/delete/",
+            {"month": "2026-03", "version": 2},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertIsNone(self.detail("2026-05")["IQD"]["limit"])
+        self.assertEqual(self.detail("2026-06")["IQD"]["limit"], "300.00")
 
     def test_stale_version_and_duplicate_retry_cannot_change_rules(self) -> None:
         self.assertEqual(self.post().status_code, 200)
@@ -216,9 +286,12 @@ class BudgetTests(TestCase):
             )
         response = self.listing().json()
         self.assertEqual(response["count"], 35)
-        self.assertEqual(len(response["results"]), 30)
+        self.assertEqual(len(response["results"]), 10)
         self.assertIn("month=2026-01", response["next"])
-        self.assertEqual(len(self.client.get(response["next"]).json()["results"]), 5)
+        self.assertEqual(len(self.client.get(response["next"]).json()["results"]), 10)
+        self.assertEqual(
+            len(self.client.get("/api/v1/budgets/?month=2026-01&page=4").json()["results"]), 5
+        )
         categories = list(budgets.active_categories(self.user, date(2026, 1, 1))[:30])
         with self.assertNumQueries(2):
             budgets.budget_rows(categories, self.user, date(2026, 1, 1))

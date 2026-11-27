@@ -331,6 +331,7 @@ class RecurringSchedule(models.Model):
         max_length=7, choices=RecurringState.choices, default=RecurringState.ACTIVE
     )
     version = models.PositiveIntegerField(default=1)
+    deleted_at = models.DateTimeField(null=True, default=None)
     request_id = models.UUIDField()
     creation_payload = models.JSONField()
 
